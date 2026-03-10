@@ -25,7 +25,7 @@ def query_cmd(question: str) -> None:
     from neorando.agent import answer_question
 
     with track_usage() as usage:
-        ans = answer_question(question)
+        ans = answer_question(question, history=[])
 
     click.echo(ans.model_dump_json(indent=2, exclude_none=True))
     click.echo(
@@ -67,6 +67,9 @@ def run_cmd(input_csv: str, output_json: str) -> None:
 
     from neorando.agent import answer_question
     from neorando.schemas import AgentAnswer
+    from langchain_core.messages import BaseMessage, HumanMessage
+    from typing import List
+
 
     if output_json is None:
         output_json = _default_output()
@@ -80,6 +83,7 @@ def run_cmd(input_csv: str, output_json: str) -> None:
         sys.exit(1)
 
     results: list[dict] = []
+    history: List[BaseMessage] = []
     with track_usage() as total_usage:
         pbar = tqdm(df.iterrows(), total=len(df), desc="Questions")
         for _i, row in pbar:
@@ -87,7 +91,7 @@ def run_cmd(input_csv: str, output_json: str) -> None:
             t0 = time.time()
             try:
                 with track_usage() as question_usage:
-                    ans = answer_question(question)
+                    ans = answer_question(question, history)
             except Exception:
                 click.secho(
                     f"⚠️  Erreur pour la question {_i} : {question!r}",
