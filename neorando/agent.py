@@ -10,29 +10,40 @@ en entrée et retourne une instance de `AgentAnswer`.
 
 from __future__ import annotations
 
-from neorando.schemas import AgentAnswer
-from typing import List, Any
+import asyncio
 import json
+import logging
 from datetime import datetime, timedelta
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langchain_core.tools import tool
-from langchain.agents import create_agent
-from bs4 import BeautifulSoup
+from typing import Any, List
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 from urllib.parse import urljoin
-from playwright_stealth import Stealth
+
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from langchain.agents import create_agent
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
 from playwright.async_api import (
     Error as PlaywrightError,
+)
+from playwright.async_api import (
     TimeoutError as PlaywrightTimeout,
+)
+from playwright.async_api import (
     async_playwright,
 )
+from playwright_stealth import Stealth
 
+from neorando.schemas import AgentAnswer
 
-
-from dotenv import load_dotenv
 load_dotenv()
 SOURCE_URL = "https://www.grenoble-tourisme.com/fr/faire/randonner/a-pied/"
-
 
 
 # ----- tools -----
@@ -43,12 +54,15 @@ BROWSER_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
+
+
 @tool
 async def scraper_tool(
     url: str,
     selector: str | None = None,
     include_links: bool = False,
-    max_length: int = 50000,) -> dict:
+    max_length: int = 50000,
+) -> dict:
     """
     Scrape et extrait le contenu textuel d'une page web.
 
@@ -64,14 +78,19 @@ async def scraper_tool(
     Returns :
     Dictionnaire avec le contenu scrappé (url, titre, description, contenu, longueur) ou un dict d'erreur
     """
-    
+
     max_length = max(1000, min(max_length, 500000))
 
     try:
         # Validate URL
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
-
+        logger.debug(
+            "[scraper] Début du scraping → %s (selector=%s, max_length=%d)",
+            url,
+            selector,
+            max_length,
+        )
 
         # Launch headless browser with stealth
         async with async_playwright() as p:
@@ -99,7 +118,6 @@ async def scraper_tool(
                     timeout=50000,
                 )
 
-
                 if response is None:
                     return {"error": "Navigation failed: no response received"}
 
@@ -107,9 +125,13 @@ async def scraper_tool(
                     return {"error": f"HTTP {response.status}: Failed to fetch URL"}
 
                 content_type = response.headers.get("content-type", "").lower()
-                if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
+                if not any(
+                    t in content_type for t in ["text/html", "application/xhtml+xml"]
+                ):
                     return {
-                        "error": (f"Skipping non-HTML content (Content-Type: {content_type})"),
+                        "error": (
+                            f"Skipping non-HTML content (Content-Type: {content_type})"
+                        ),
                         "url": url,
                         "skipped": True,
                     }
@@ -130,7 +152,16 @@ async def scraper_tool(
 
         # Remove noise elements
         for tag in soup(
-            ["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]
+            [
+                "script",
+                "style",
+                "nav",
+                "footer",
+                "header",
+                "aside",
+                "noscript",
+                "iframe",
+            ]
         ):
             tag.decompose()
 
@@ -157,7 +188,9 @@ async def scraper_tool(
                 or soup.find(class_=["content", "post", "entry", "article-body"])
                 or soup.find("body")
             )
-            text = main_content.get_text(separator=" ", strip=True) if main_content else ""
+            text = (
+                main_content.get_text(separator=" ", strip=True) if main_content else ""
+            )
 
         # Clean up whitespace
         text = " ".join(text.split())
@@ -187,22 +220,32 @@ async def scraper_tool(
                     links.append({"text": link_text, "href": absolute_href})
             result["links"] = links
 
+        logger.debug(
+            "[scraper] Scraping terminé → %s (%d caractères extraits)",
+            url,
+            result["length"],
+        )
         return result
 
     except PlaywrightTimeout:
+        logger.warning("[scraper] Timeout → %s", url)
         return {"error": "Request timed out"}
     except PlaywrightError as e:
+        logger.error("[scraper] Erreur navigateur → %s", e)
         return {"error": f"Browser error: {e!s}"}
     except Exception as e:
+        logger.error("[scraper] Erreur inattendue → %s", e)
         return {"error": f"Scraping failed: {e!s}"}
-    
+
 
 TOOLS = [scraper_tool]
 
 # Initialisation des LLMs et de l'agent
 # mini for reasoning, nano for structured output (AgentAnswer)
-llm_gpt5_mini = ChatOpenAI(model="gpt-5-mini", temperature=0) 
-llm_gpt5_nano = ChatOpenAI(model="gpt-5-nano", temperature=0).with_structured_output(AgentAnswer)
+llm_gpt5_mini = ChatOpenAI(model="gpt-5-mini", temperature=0)
+llm_gpt5_nano = ChatOpenAI(model="gpt-5-nano", temperature=0).with_structured_output(
+    AgentAnswer
+)
 
 # TODO : improve system priompt with tools descritpion
 SYSTEM_MESSAGE = (
@@ -215,7 +258,8 @@ SYSTEM_MESSAGE = (
     "N'utilise pas de sources externes autres que le site officiel. "
 )
 
-agent = create_agent(llm_gpt5_mini, tools=TOOLS, prompt=SYSTEM_MESSAGE)
+agent = create_agent(llm_gpt5_mini, tools=TOOLS, system_prompt=SYSTEM_MESSAGE, debug=True)
+
 
 def answer_question(question: str, history: List[BaseMessage]) -> AgentAnswer:
     """Répond à une question sur les randonnées autour de Grenoble.
@@ -227,17 +271,24 @@ def answer_question(question: str, history: List[BaseMessage]) -> AgentAnswer:
         AgentAnswer: La réponse structurée, avec exactement UN des champs
         `answer`, `numeric`, `boolean` ou `items` renseigné.
     """
-    # raise NotImplementedError("À vous de jouer ! Implémentez votre agent ici.")
+    return asyncio.run(_answer_question_async(question, history))
+
+
+async def _answer_question_async(
+    question: str, history: List[BaseMessage]
+) -> AgentAnswer:
     try:
-        result = agent.invoke(
+        result = await agent.ainvoke(
             {"messages": history + [HumanMessage(content=question)]},
-            config={"recursion_limit": 50}
+            config={"recursion_limit": 50},
         )
         last_message = result["messages"][-1]
+        logger.debug("[agent] Réponse brute de l'agent :\n%s", last_message.content)
         history += [HumanMessage(content=question), last_message]
         # Formatage de la réponse en AgentAnswer via gpt-5-nano
         # On passe la question ET la réponse de l'agent pour que nano
         # sache quel champ remplir (answer, numeric, boolean ou items)
+
         formatting_prompt = HumanMessage(
             content=(
                 f"Question originale : {question}\n\n"
@@ -250,8 +301,13 @@ def answer_question(question: str, history: List[BaseMessage]) -> AgentAnswer:
                 " - `items`   → liste ordonnée de chaînes de caractères (noms de randonnées, communes, …)"
             )
         )
-        return llm_gpt5_nano.invoke([formatting_prompt])
+        return await llm_gpt5_nano.ainvoke([formatting_prompt])
     except Exception as e:
-        history += [HumanMessage(content=question), AIMessage(content=f"Erreur : {str(e)}")]
-        return None
-    
+        logger.error("[agent] Erreur dans answer_question : %s", e, exc_info=True)
+        history += [
+            HumanMessage(content=question),
+            AIMessage(content=f"Erreur : {str(e)}"),
+        ]
+        return AgentAnswer(
+            answer=f"Erreur lors du traitement de la question : {str(e)}"
+        )

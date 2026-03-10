@@ -26,6 +26,7 @@ def query_cmd(question: str) -> None:
 
     with track_usage() as usage:
         ans = answer_question(question, history=[])
+        
 
     click.echo(ans.model_dump_json(indent=2, exclude_none=True))
     click.echo(
