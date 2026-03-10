@@ -1,0 +1,88 @@
+[
+  {
+    "index": 0,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Sappey Eglise",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 1,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 6.0,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 2,
+    "answer_type": "boolean",
+    "field": "Boolean",
+    "expected": true,
+    "comparison": "exact",
+    "tolerance": null
+  },
+  {
+    "index": 3,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 84,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 4,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 132.0,
+    "comparison": "exact",
+    "tolerance": 0.05
+  },
+  {
+    "index": 5,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "GR® 738 - La Haute Traversée de Belledonne",
+      "Traversée de Chartreuse - Rando pédestre 5 jours",
+      "Boucle de Chamechaude"
+    ],
+    "comparison": "fuzzy",
+    "tolerance": null,
+    "ordered": true
+  },
+  {
+    "index": 6,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Le ruisseau de la Pissarde",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 7,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "La traversée du Mont Jalla",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 8,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 8.79,
+    "comparison": "exact",
+    "tolerance": 0.1
+  },
+  {
+    "index": 9,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 20.2,
+    "comparison": "exact",
+    "tolerance": 0.2,
+    "_note": "OSRM routing — durée en minutes, tolérance 20%"
+  }
+]

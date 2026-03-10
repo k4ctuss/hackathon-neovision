@@ -1,0 +1,41 @@
+[project]
+name = "neorando"
+version = "0.1.0"
+description = "Hackathon Nsigma x Neovision 2026 — Agent Randonnées Grenoble"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.0",
+    "pandas>=2.0",
+    "pydantic>=2.0",
+    "rapidfuzz>=3.0",
+    "rich-click>=1.7",
+    "requests>=2.31",
+    "unidecode>=1.3",
+    "jupyter>=1.1.1",
+    "nbconvert>=7.16.6",
+    "aiohttp>=3.11.16",
+    "tqdm>=4.60",
+    "openai-callback @ {root:uri}/wheels/openai_callback-0.1.0-py3-none-any.whl",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.0",
+    "ruff>=0.11.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["neorando"]
+
+[project.scripts]
+neorando = "neorando.cli:main"

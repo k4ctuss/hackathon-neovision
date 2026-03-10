@@ -1,0 +1,16 @@
+{
+    "recommendations": [
+        "ms-python.python",
+        "rodolphebarbanneau.python-docstring-highlighter",
+        "charliermarsh.ruff",
+        "ms-toolsai.jupyter",
+        "eamodio.gitlens",
+        "mhutchie.git-graph",
+        "aaron-bond.better-comments",
+        "tamasfe.even-better-toml",
+        "mechatroner.rainbow-csv",
+        "tomoki1207.pdf",
+        "github.copilot",
+        "ms-vscode-remote.remote-ssh"
+    ]
+}
