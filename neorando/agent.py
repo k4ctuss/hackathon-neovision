@@ -27,19 +27,22 @@ from playwright.async_api import (
     async_playwright,
 )
 
+
+
+from dotenv import load_dotenv
+load_dotenv()
+SOURCE_URL = "https://www.grenoble-tourisme.com/fr/faire/randonner/a-pied/"
+
+
+
+# ----- tools -----
+
 # Browser-like User-Agent for actual page requests
 BROWSER_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
-
-from dotenv import load_dotenv
-load_dotenv()
-
-SOURCE_URL = "https://www.grenoble-tourisme.com/fr/faire/randonner/a-pied/"
-
-
 @tool
 async def scraper_tool(
     url: str,
@@ -196,7 +199,11 @@ async def scraper_tool(
 
 TOOLS = [scraper_tool]
 
-llm = ChatOpenAI(model="gpt-5-mini", temperature=0)
+# Initialisation des LLMs et de l'agent
+# mini for reasoning, nano for structured output (AgentAnswer)
+llm_gpt5_mini = ChatOpenAI(model="gpt-5-mini", temperature=0) 
+llm_gpt5_nano = ChatOpenAI(model="gpt-5-nano", temperature=0).with_structured_output(AgentAnswer)
+
 # TODO : improve system priompt with tools descritpion
 SYSTEM_MESSAGE = (
     "Tu es Neorando, un agent IA expert des randonnées autour de Grenoble. "
@@ -208,7 +215,7 @@ SYSTEM_MESSAGE = (
     "N'utilise pas de sources externes autres que le site officiel. "
 )
 
-agent = create_agent(llm, tools=TOOLS, prompt=SYSTEM_MESSAGE)
+agent = create_agent(llm_gpt5_mini, tools=TOOLS, prompt=SYSTEM_MESSAGE)
 
 def answer_question(question: str, history: List[BaseMessage]) -> AgentAnswer:
     """Répond à une question sur les randonnées autour de Grenoble.
@@ -226,13 +233,25 @@ def answer_question(question: str, history: List[BaseMessage]) -> AgentAnswer:
             {"messages": history + [HumanMessage(content=question)]},
             config={"recursion_limit": 50}
         )
-        history += [HumanMessage(content=question), result]
-        # Return the last AI message
-        #return result["messages"][-1]
-        # TODO : faire la logique de reponse
-        return AgentAnswer()
+        last_message = result["messages"][-1]
+        history += [HumanMessage(content=question), last_message]
+        # Formatage de la réponse en AgentAnswer via gpt-5-nano
+        # On passe la question ET la réponse de l'agent pour que nano
+        # sache quel champ remplir (answer, numeric, boolean ou items)
+        formatting_prompt = HumanMessage(
+            content=(
+                f"Question originale : {question}\n\n"
+                f"Réponse de l'agent : {last_message.content}\n\n"
+                "En te basant sur la question et la réponse ci-dessus, "
+                "remplis Exactement UN des quatre champs doit être renseigné selon le type de question :"
+                " - `answer`  → réponse textuelle (nom de randonnée, commune, point de départ, …)"
+                " - `numeric` → valeur numérique (distance, durée, nombre, dénivelé, …)"
+                " - `boolean` → oui / non"
+                " - `items`   → liste ordonnée de chaînes de caractères (noms de randonnées, communes, …)"
+            )
+        )
+        return llm_gpt5_nano.invoke([formatting_prompt])
     except Exception as e:
-        # Return error as an AI message so the conversation can continue
-        history += [HumanMessage(content=question), AIMessage(content=f"Error: {str(e)}\n\nPlease try rephrasing your request or provide more specific details.")]
+        history += [HumanMessage(content=question), AIMessage(content=f"Erreur : {str(e)}")]
         return None
     
