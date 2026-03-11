@@ -115,9 +115,9 @@ def parse_hike_page(html: str, url: str) -> dict:
     if soup.find(string=re.compile(r"page.*introuvable|n.a pas été trouvée", re.I)):
         return {}
 
-    # Name
+    # Name (collapse multiple spaces)
     h1 = soup.find("h1")
-    name = h1.get_text(strip=True) if h1 else ""
+    name = " ".join((h1.get_text(strip=True) if h1 else "").split())
 
     hike: dict = {
         "name": name,
@@ -163,10 +163,11 @@ def parse_hike_page(html: str, url: str) -> dict:
                 elif "niveau" in label:
                     # e.g. "Niveau noir - Très difficile", "Niveau bleu - Facile"
                     m = re.search(r"[-–]\s*(.+)", value)
-                    if m:
-                        hike["difficulte"] = m.group(1).strip()
-                    else:
-                        hike["difficulte"] = value.strip()
+                    diff = m.group(1).strip() if m else value.strip()
+                    # Normalize: keep only the main difficulty level
+                    # e.g. "Facile, Adapté aux débutants" → "Facile"
+                    diff = diff.split(",")[0].strip()
+                    hike["difficulte"] = diff
 
                 elif "type" in label:
                     hike["type_parcours"] = value.strip()
@@ -257,6 +258,33 @@ def parse_hike_page(html: str, url: str) -> dict:
     return hike
 
 
+def _stub_from_url(url: str) -> dict:
+    """Create a minimal hike entry from the URL slug when the page is unavailable."""
+    slug = url.rstrip("/").split("/")[-1]
+    # Remove trailing numeric ID
+    name = re.sub(r"-\d+$", "", slug)
+    # Humanize: hyphens → spaces, title case
+    name = name.replace("-", " ").strip()
+    # Fix common French elisions (l-xxx → l'xxx, d-xxx → d'xxx)
+    name = re.sub(r"\b([ldLD]) ", r"\1'", name)
+    name = name[0].upper() + name[1:] if name else name
+    return {
+        "name": name,
+        "url": url,
+        "commune": None,
+        "depart": None,
+        "distance_km": None,
+        "duree_min": None,
+        "denivele_positif_m": None,
+        "denivele_negatif_m": None,
+        "difficulte": None,
+        "type_parcours": None,
+        "animaux_acceptes": None,
+        "latitude": None,
+        "longitude": None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Batch scraping
 # ---------------------------------------------------------------------------
@@ -288,17 +316,19 @@ async def scrape_all_hikes(urls: list[str] | None = None) -> list[dict]:
                 try:
                     resp = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                     if not resp or resp.status != 200:
-                        logger.warning("HTTP %s for %s", resp.status if resp else "None", url)
-                        return None
+                        logger.warning("HTTP %s for %s — creating stub entry", resp.status if resp else "None", url)
+                        return _stub_from_url(url)
                     try:
                         await page.wait_for_load_state("networkidle", timeout=5000)
                     except Exception:
                         pass
                     html = await page.content()
-                    return parse_hike_page(html, url)
+                    result = parse_hike_page(html, url)
+                    # 404 soft pages return empty dict
+                    return result if result.get("name") else _stub_from_url(url)
                 except Exception as e:
-                    logger.error("Error scraping %s: %s", url, e)
-                    return None
+                    logger.error("Error scraping %s: %s — creating stub entry", url, e)
+                    return _stub_from_url(url)
                 finally:
                     await context.close()
 
