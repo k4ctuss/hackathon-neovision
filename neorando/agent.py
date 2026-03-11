@@ -11,6 +11,9 @@ en entrée et retourne une instance de `AgentAnswer`.
 from __future__ import annotations
 
 import asyncio
+import aiohttp
+import certifi
+import ssl
 import json
 import logging
 from datetime import datetime, timedelta
@@ -238,7 +241,65 @@ async def scraper_tool(
         return {"error": f"Scraping failed: {e!s}"}
 
 
-TOOLS = [scraper_tool]
+@tool
+async def address_to_location_tool(lieu: str) -> dict:
+    """Obtenir les coordonnées géographiques (latitude, longitude) d'un lieu.
+
+    Utilise l'API Nominatim d'OpenStreetMap. Le lieu est un texte humain
+    (ex : 'gare de Grenoble', 'Col de Vence, Alpes-Maritimes') qui sera
+    automatiquement encodé en query string pour la requête.
+
+
+    Args:
+        lieu (str): Texte humain décrivant le lieu à géocoder.
+                       Exemples : 'gare de Grenoble', 'Col du Galibier, Savoie'
+
+    Returns:
+        dict: Coordonnées du lieu ou dict d'erreur.
+        Exemple de succès :
+        {
+            "display_name": "Gare de Grenoble, Grenoble, Isère, France",
+            "lat": 45.1916,
+            "lon": 5.7167
+        }
+        Exemple d'erreur :
+        {"error": "Aucun résultat trouvé pour : 'xyz inexistant'"}
+    """
+    API_BASE_URL = "https://nominatim.openstreetmap.org/search"
+    # Nominatim attend une query string encodée
+    params = {
+        "q": lieu,
+        "format": "json",
+        "limit": 1,
+    }
+    headers = {"User-Agent": BROWSER_USER_AGENT}
+    # ssl certif pour fix un problème de SSL sur les requetes de l'api qui me refusait, j'ai pas trouver d'autre solution que ce que chat a dit.
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    logger.debug("[address_to_location_tool] Géocodage → '%s'", lieu)
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(API_BASE_URL, params=params, timeout=aiohttp.ClientTimeout(total=10), ssl=ssl_ctx) as response:
+                response.raise_for_status()
+                data = await response.json()
+    except aiohttp.ClientError as e:
+        logger.error("[address_to_location_tool] Erreur de requête → %s", e)
+        return {"error": f"Request error: {e!s}"}
+
+    if not data:
+        logger.warning("[address_to_location_tool] Aucun résultat pour → '%s'", lieu)
+        return {"error": f"Aucun résultat trouvé pour : '{lieu}'"}
+
+    first = data[0]
+    result = {
+        "display_name": first.get("display_name", ""),
+        "lat": float(first["lat"]),
+        "lon": float(first["lon"]),
+    }
+    logger.debug("[address_to_location_tool] Résultat → %s", result)
+    return result
+        
+
+TOOLS = [scraper_tool, address_to_location_tool]
 
 # Initialisation des LLMs et de l'agent
 # mini for reasoning, nano for structured output (AgentAnswer)
@@ -250,7 +311,7 @@ llm_gpt5_nano = ChatOpenAI(model="gpt-5-nano", temperature=0).with_structured_ou
 # TODO : improve system priompt with tools descritpion
 SYSTEM_MESSAGE = (
     "Tu es Neorando, un agent IA expert des randonnées autour de Grenoble. "
-    f"Ta mission est de répondre précisément et efficacement à toutes les questions concernant les randonnées, en utilisant uniquement des données issues du site officiel du tourisme de Grenoble. voici le lien : {SOURCE_URL}. "
+    f"Ta mission est de répondre précisément et efficacement à toutes les questions concernant les randonnées, en utilisant des données issues du site officiel du tourisme de Grenoble. voici le lien : {SOURCE_URL} mais aussi des outils de scraping et de géocodage pour récupérer les informations nécessaires. "
     "Pour chaque question, analyse le type de réponse attendue (texte, nombre, oui/non, liste) et fournis une réponse structurée selon le schéma fourni (un seul champ renseigné). "
     "Ne demande jamais d'informations supplémentaires à l'utilisateur : récupère et traite les données toi-même. "
     "Sois concis, exact, et veille à ce que ta réponse soit toujours reproductible. "

@@ -1754,6 +1754,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
+    { name = "certifi" },
     { name = "jupyter" },
     { name = "langchain" },
     { name = "langchain-core" },
@@ -1784,6 +1785,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.11.16" },
+    { name = "certifi", specifier = ">=2026.1.4" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "langchain", specifier = ">=1.0.2" },
     { name = "langchain-core", specifier = ">=1.2.18" },
