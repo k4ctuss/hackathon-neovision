@@ -11,13 +11,14 @@ en entrée et retourne une instance de `AgentAnswer`.
 from __future__ import annotations
 
 import asyncio
-import aiohttp
-import certifi
-import ssl
 import json
 import logging
+import ssl
 from datetime import datetime, timedelta
 from typing import Any, List
+
+import aiohttp
+import certifi
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -278,7 +279,12 @@ async def address_to_location_tool(lieu: str) -> dict:
     logger.debug("[address_to_location_tool] Géocodage → '%s'", lieu)
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(API_BASE_URL, params=params, timeout=aiohttp.ClientTimeout(total=10), ssl=ssl_ctx) as response:
+            async with session.get(
+                API_BASE_URL,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=10),
+                ssl=ssl_ctx,
+            ) as response:
                 response.raise_for_status()
                 data = await response.json()
     except aiohttp.ClientError as e:
@@ -297,9 +303,133 @@ async def address_to_location_tool(lieu: str) -> dict:
     }
     logger.debug("[address_to_location_tool] Résultat → %s", result)
     return result
-        
 
-TOOLS = [scraper_tool, address_to_location_tool]
+
+@tool
+def calcul_distance_vol_oiseau(
+    lat1: float, lon1: float, lat2: float, lon2: float
+) -> dict:
+    """Calcule la distance à vol d'oiseau (en km) entre deux points géographiques.
+
+    Utilise la formule de Haversine. Les coordonnées sont en degrés décimaux (WGS84).
+
+    Args:
+        lat1 (float): Latitude du point de départ en degrés décimaux (ex: 45.1916)
+        lon1 (float): Longitude du point de départ en degrés décimaux (ex: 5.7167)
+        lat2 (float): Latitude du point d'arrivée en degrés décimaux
+        lon2 (float): Longitude du point d'arrivée en degrés décimaux
+
+    Returns:
+        dict: Distance en kilomètres.
+        Exemple de succès :
+        {"distance_km": 12.34}
+        Exemple d'erreur :
+        {"error": "Coordonnées invalides"}
+    """
+    import math
+
+    try:
+        R = 6371.0  # Rayon de la Terre en km
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlambda = math.radians(lon2 - lon1)
+        a = (
+            math.sin(dphi / 2) ** 2
+            + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+        )
+        distance_km = 2 * R * math.asin(math.sqrt(a))
+        logger.debug(
+            "[calcul_distance_vol_oiseau] %.4f, %.4f → %.4f, %.4f = %.3f km",
+            lat1,
+            lon1,
+            lat2,
+            lon2,
+            distance_km,
+        )
+        return {"distance_km": round(distance_km, 3)}
+    except Exception as e:
+        logger.error("[calcul_distance_vol_oiseau] Erreur → %s", e)
+        return {"error": f"Coordonnées invalides : {e!s}"}
+
+
+@tool
+async def calculer_itineraire_routier(
+    lat1: float, lon1: float, lat2: float, lon2: float
+) -> dict:
+    """Calcule l'itinéraire routier (distance et durée) entre deux points géographiques via l'API IGN.
+
+    Utilise le service data.geopf.fr avec le moteur OSRM (trajet voiture le plus rapide).
+    Les coordonnées sont en degrés décimaux (WGS84).
+
+    Args:
+        lat1 (float): Latitude du point de départ en degrés décimaux (ex: 45.1916)
+        lon1 (float): Longitude du point de départ en degrés décimaux (ex: 5.7167)
+        lat2 (float): Latitude du point d'arrivée en degrés décimaux
+        lon2 (float): Longitude du point d'arrivée en degrés décimaux
+
+    Returns:
+        dict: Distance et durée du trajet routier.
+        Exemple de succès :
+        {
+            "distance_km": 15.2,
+            "duree_minutes": 22.5
+        }
+        Exemple d'erreur :
+        {"error": "Impossible de calculer l'itinéraire"}
+    """
+    API_URL = "https://data.geopf.fr/navigation/itineraire"
+    # L'API attend les coordonnées au format "lon,lat" (pas lat,lon !)
+    params = {
+        "resource": "bdtopo-osrm",
+        "start": f"{lon1},{lat1}",
+        "end": f"{lon2},{lat2}",
+        "profile": "car",
+        "optimization": "fastest",
+        "distanceUnit": "kilometer",
+        "timeUnit": "minute",
+        "getSteps": "false",
+        "getBbox": "false",
+    }
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    logger.debug(
+        "[calculer_itineraire_routier] %.4f,%.4f → %.4f,%.4f", lat1, lon1, lat2, lon2
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                API_URL,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=15),
+                ssl=ssl_ctx,
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+    except aiohttp.ClientError as e:
+        logger.error("[calculer_itineraire_routier] Erreur requête → %s", e)
+        return {"error": f"Erreur requête : {e!s}"}
+
+    try:
+        distance_km = round(float(data["distance"]), 3)
+        duree_minutes = round(float(data["duration"]), 2)
+        logger.debug(
+            "[calculer_itineraire_routier] distance=%.3f km, durée=%.2f min",
+            distance_km,
+            duree_minutes,
+        )
+        return {"distance_km": distance_km, "duree_minutes": duree_minutes}
+    except (KeyError, ValueError) as e:
+        logger.error(
+            "[calculer_itineraire_routier] Réponse inattendue → %s | data=%s", e, data
+        )
+        return {"error": f"Réponse inattendue de l'API : {e!s}"}
+
+
+TOOLS = [
+    scraper_tool,
+    address_to_location_tool,
+    calcul_distance_vol_oiseau,
+    calculer_itineraire_routier,
+]
 
 # Initialisation des LLMs et de l'agent
 # mini for reasoning, nano for structured output (AgentAnswer)
@@ -308,7 +438,6 @@ llm_gpt5_nano = ChatOpenAI(model="gpt-5-nano", temperature=0).with_structured_ou
     AgentAnswer
 )
 
-# TODO : improve system priompt with tools descritpion
 SYSTEM_MESSAGE = (
     "Tu es Neorando, un agent IA expert des randonnées autour de Grenoble. "
     f"Ta mission est de répondre précisément et efficacement à toutes les questions concernant les randonnées, en utilisant des données issues du site officiel du tourisme de Grenoble. voici le lien : {SOURCE_URL} mais aussi des outils de scraping et de géocodage pour récupérer les informations nécessaires. "
@@ -319,7 +448,9 @@ SYSTEM_MESSAGE = (
     "N'utilise pas de sources externes autres que le site officiel. "
 )
 
-agent = create_agent(llm_gpt5_mini, tools=TOOLS, system_prompt=SYSTEM_MESSAGE, debug=True)
+agent = create_agent(
+    llm_gpt5_mini, tools=TOOLS, system_prompt=SYSTEM_MESSAGE, debug=True
+)
 
 
 def answer_question(question: str, history: List[BaseMessage]) -> AgentAnswer:
