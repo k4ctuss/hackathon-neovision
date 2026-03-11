@@ -1,7 +1,7 @@
 ### Custom ###
 data/*
-!data/questions.csv
-!data/expected_answers.json
+!data/questions*
+!data/expected_answers*
 notebooks/
 
 ### Python ###
