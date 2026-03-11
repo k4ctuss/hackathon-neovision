@@ -1,4 +1,6 @@
-# Hackathon Nsigma x Neovision 2026 — NeoRando
+# Hackathon Nsigma x Neovision 2026 — NeoRando 
+
+## Equipes Demolastre: Noah Deplace , Antoine Marion, Nolan Blanc
 
 Template de projet pour le hackathon. Consultez d'abord le [SUJET](SUJET.md) pour les consignes complètes (contexte, contraintes, évaluation).
 
