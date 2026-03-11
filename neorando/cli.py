@@ -269,5 +269,34 @@ def usage_cmd(details: bool) -> None:
     click.echo()
 
 
+# ── scrape ──────────────────────────────────────────────────────────────────
+
+
+@main.command("scrape")
+def scrape_cmd() -> None:
+    """Pré-scrape toutes les randonnées du site et sauvegarde dans data/hikes.json.
+
+    À lancer UNE FOIS avant d'utiliser l'agent. Les données seront ensuite
+    chargées automatiquement par l'agent pour répondre aux questions.
+    """
+    import asyncio
+
+    from neorando.scraper import CACHE_PATH, scrape_and_save
+
+    click.echo("🔍 Scraping de toutes les randonnées en cours...")
+    hikes = asyncio.run(scrape_and_save())
+    click.echo(f"✅ {len(hikes)} randonnées sauvegardées dans {CACHE_PATH}")
+
+    # Quick summary
+    with_coords = sum(1 for h in hikes if h.get("latitude"))
+    with_dist = sum(1 for h in hikes if h.get("distance_km"))
+    with_dur = sum(1 for h in hikes if h.get("duree_min"))
+    with_diff = sum(1 for h in hikes if h.get("difficulte"))
+    click.echo(
+        f"   📊 Coords GPS: {with_coords} | Distance: {with_dist} | "
+        f"Durée: {with_dur} | Difficulté: {with_diff}"
+    )
+
+
 if __name__ == "__main__":
     main()

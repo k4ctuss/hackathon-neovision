@@ -13,20 +13,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import ssl
-from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, List
+from urllib.parse import urljoin
 
 import aiohttp
 import certifi
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-from urllib.parse import urljoin
-
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from langchain.agents import create_agent
@@ -46,13 +40,68 @@ from playwright_stealth import Stealth
 
 from neorando.schemas import AgentAnswer
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
 load_dotenv()
 SOURCE_URL = "https://www.grenoble-tourisme.com/fr/faire/randonner/a-pied/"
 
+# ---------------------------------------------------------------------------
+# Load cached hike data (pre-scraped)
+# ---------------------------------------------------------------------------
 
-# ----- tools -----
+CACHE_PATH = Path(__file__).parent.parent / "data" / "hikes.json"
+_HIKES_DATA: list[dict] = []
 
-# Browser-like User-Agent for actual page requests
+
+def _load_cached_hikes() -> list[dict]:
+    """Load pre-scraped hike data from cache file."""
+    global _HIKES_DATA
+    if _HIKES_DATA:
+        return _HIKES_DATA
+    if CACHE_PATH.exists():
+        with open(CACHE_PATH, "r", encoding="utf-8") as f:
+            _HIKES_DATA = json.load(f)
+        logger.info("Loaded %d hikes from cache", len(_HIKES_DATA))
+    else:
+        logger.warning("No hike cache found at %s. Run 'uv run neorando scrape' first.", CACHE_PATH)
+    return _HIKES_DATA
+
+
+def _build_hikes_summary() -> str:
+    """Build a compact summary of all hikes for the system prompt."""
+    hikes = _load_cached_hikes()
+    if not hikes:
+        return "AUCUNE DONNÉE DE RANDONNÉE DISPONIBLE. Utilise le scraper_tool pour récupérer les données du site."
+
+    lines = [f"BASE DE DONNÉES DES RANDONNÉES ({len(hikes)} randonnées au total) :"]
+    lines.append("Format: #ID | Nom | Commune | Départ | Distance(km) | Durée(min) | D+(m) | D-(m) | Difficulté | Type | Animaux | Lat,Lon | URL")
+    lines.append("-" * 40)
+
+    for i, h in enumerate(hikes):
+        lat = h.get("latitude") or ""
+        lon = h.get("longitude") or ""
+        coords = f"{lat},{lon}" if lat and lon else "?"
+        animaux = "oui" if h.get("animaux_acceptes") is True else ("non" if h.get("animaux_acceptes") is False else "?")
+        line = (
+            f"#{i} | {h.get('name', '?')} | {h.get('commune', '?')} | "
+            f"{h.get('depart', '?')} | {h.get('distance_km', '?')} | "
+            f"{h.get('duree_min', '?')} | {h.get('denivele_positif_m', '?')} | "
+            f"{h.get('denivele_negatif_m', '?')} | {h.get('difficulte', '?')} | "
+            f"{h.get('type_parcours', '?')} | {animaux} | {coords} | {h.get('url', '')}"
+        )
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
+
 BROWSER_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -71,7 +120,7 @@ async def scraper_tool(
     Scrape et extrait le contenu textuel d'une page web.
 
     Utilise un navigateur sans interface (headless) pour rendre le JavaScript et contourner la détection des robots.
-    À utiliser lorsque tu dois lire le contenu d'une URL spécifique, extraire des données d'un site web, ou lire des articles/documentations.
+    À utiliser UNIQUEMENT si l'information n'est pas dans la base de données locale.
 
     Args :
     url : URL de la page web à scraper
@@ -82,21 +131,13 @@ async def scraper_tool(
     Returns :
     Dictionnaire avec le contenu scrappé (url, titre, description, contenu, longueur) ou un dict d'erreur
     """
-
     max_length = max(1000, min(max_length, 500000))
 
     try:
-        # Validate URL
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
-        logger.debug(
-            "[scraper] Début du scraping → %s (selector=%s, max_length=%d)",
-            url,
-            selector,
-            max_length,
-        )
+        logger.debug("[scraper] Début du scraping → %s (selector=%s)", url, selector)
 
-        # Launch headless browser with stealth
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
@@ -117,129 +158,159 @@ async def scraper_tool(
                 await Stealth().apply_stealth_async(page)
 
                 response = await page.goto(
-                    url,
-                    wait_until="domcontentloaded",
-                    timeout=50000,
+                    url, wait_until="domcontentloaded", timeout=50000
                 )
 
                 if response is None:
                     return {"error": "Navigation failed: no response received"}
-
                 if response.status != 200:
                     return {"error": f"HTTP {response.status}: Failed to fetch URL"}
 
                 content_type = response.headers.get("content-type", "").lower()
-                if not any(
-                    t in content_type for t in ["text/html", "application/xhtml+xml"]
-                ):
-                    return {
-                        "error": (
-                            f"Skipping non-HTML content (Content-Type: {content_type})"
-                        ),
-                        "url": url,
-                        "skipped": True,
-                    }
+                if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
+                    return {"error": f"Skipping non-HTML content (Content-Type: {content_type})", "url": url, "skipped": True}
 
-                # Wait for JS to finish rendering dynamic content
                 try:
                     await page.wait_for_load_state("networkidle", timeout=3000)
                 except PlaywrightTimeout:
-                    pass  # Proceed with whatever has loaded
+                    pass
 
-                # Get fully rendered HTML
                 html_content = await page.content()
             finally:
                 await browser.close()
 
-        # Parse rendered HTML with BeautifulSoup
         soup = BeautifulSoup(html_content, "html.parser")
-
-        # Remove noise elements
-        for tag in soup(
-            [
-                "script",
-                "style",
-                "nav",
-                "footer",
-                "header",
-                "aside",
-                "noscript",
-                "iframe",
-            ]
-        ):
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]):
             tag.decompose()
 
-        # Get title and description
         title = soup.title.get_text(strip=True) if soup.title else ""
-
         description = ""
         meta_desc = soup.find("meta", attrs={"name": "description"})
         if meta_desc:
             description = meta_desc.get("content", "")
 
-        # Target content
         if selector:
             content_elem = soup.select_one(selector)
             if not content_elem:
                 return {"error": f"No elements found matching selector: {selector}"}
             text = content_elem.get_text(separator=" ", strip=True)
         else:
-            # Auto-detect main content
             main_content = (
-                soup.find("article")
-                or soup.find("main")
+                soup.find("article") or soup.find("main")
                 or soup.find(attrs={"role": "main"})
                 or soup.find(class_=["content", "post", "entry", "article-body"])
                 or soup.find("body")
             )
-            text = (
-                main_content.get_text(separator=" ", strip=True) if main_content else ""
-            )
+            text = main_content.get_text(separator=" ", strip=True) if main_content else ""
 
-        # Clean up whitespace
         text = " ".join(text.split())
-
-        # Truncate if needed
         if len(text) > max_length:
             text = text[:max_length] + "..."
 
         result: dict[str, Any] = {
-            "url": url,
-            "title": title,
-            "description": description,
-            "content": text,
-            "length": len(text),
+            "url": url, "title": title, "description": description,
+            "content": text, "length": len(text),
         }
 
-        # Extract links if requested
         if include_links:
             links: list[dict[str, str]] = []
-            base_url = str(response.url)  # Use final URL after redirects
+            base_url = str(response.url)
             for a in soup.find_all("a", href=True)[:50]:
                 href = a["href"]
-                # Convert relative URLs to absolute URLs
                 absolute_href = urljoin(base_url, href)
                 link_text = a.get_text(strip=True)
                 if link_text and absolute_href:
                     links.append({"text": link_text, "href": absolute_href})
             result["links"] = links
 
-        logger.debug(
-            "[scraper] Scraping terminé → %s (%d caractères extraits)",
-            url,
-            result["length"],
-        )
+        logger.debug("[scraper] Scraping terminé → %s (%d chars)", url, result["length"])
         return result
 
     except PlaywrightTimeout:
-        logger.warning("[scraper] Timeout → %s", url)
         return {"error": "Request timed out"}
     except PlaywrightError as e:
-        logger.error("[scraper] Erreur navigateur → %s", e)
         return {"error": f"Browser error: {e!s}"}
     except Exception as e:
-        logger.error("[scraper] Erreur inattendue → %s", e)
         return {"error": f"Scraping failed: {e!s}"}
+
+
+@tool
+def query_hikes_database(
+    filtre_nom: str | None = None,
+    filtre_commune: str | None = None,
+    filtre_difficulte: str | None = None,
+    filtre_type: str | None = None,
+    filtre_animaux: bool | None = None,
+    tri_par: str | None = None,
+    tri_descendant: bool = True,
+    limite: int = 10,
+) -> dict:
+    """Recherche et filtre les randonnées dans la base de données locale pré-scrapée.
+
+    Utilise cette fonction pour trouver des randonnées selon divers critères, faire des agrégations,
+    des classements, etc. C'est TOUJOURS le premier outil à utiliser avant de scraper le web.
+
+    Args:
+        filtre_nom: Filtre par nom de randonnée (recherche partielle, insensible à la casse)
+        filtre_commune: Filtre par commune (recherche partielle, insensible à la casse)
+        filtre_difficulte: Filtre par difficulté exacte ("Facile", "Modéré", "Difficile", "Très difficile")
+        filtre_type: Filtre par type de parcours ("Boucle", "Aller-retour", "Itinérance")
+        filtre_animaux: Filtre par acceptation des animaux (true = acceptés, false = refusés)
+        tri_par: Champ de tri ("distance_km", "duree_min", "denivele_positif_m", "denivele_negatif_m", "nom")
+        tri_descendant: Tri descendant (true) ou ascendant (false). Par défaut descendant.
+        limite: Nombre max de résultats à retourner (défaut 10, max 100)
+
+    Returns:
+        dict avec "total_matches" (nombre total avant limite), "results" (liste des randonnées matchées)
+    """
+    hikes = _load_cached_hikes()
+    if not hikes:
+        return {"error": "Base de données vide. Lancer 'uv run neorando scrape' d'abord."}
+
+    results = list(hikes)
+
+    # Apply filters
+    if filtre_nom:
+        fn = filtre_nom.lower()
+        results = [h for h in results if fn in (h.get("name") or "").lower()]
+
+    if filtre_commune:
+        fc = filtre_commune.lower()
+        results = [h for h in results if fc in (h.get("commune") or "").lower()]
+
+    if filtre_difficulte:
+        fd = filtre_difficulte.lower()
+        results = [h for h in results if fd in (h.get("difficulte") or "").lower()]
+
+    if filtre_type:
+        ft = filtre_type.lower()
+        results = [h for h in results if ft in (h.get("type_parcours") or "").lower()]
+
+    if filtre_animaux is not None:
+        results = [h for h in results if h.get("animaux_acceptes") == filtre_animaux]
+
+    total = len(results)
+
+    # Sort
+    if tri_par:
+        key_map = {
+            "distance_km": "distance_km",
+            "duree_min": "duree_min",
+            "denivele_positif_m": "denivele_positif_m",
+            "denivele_negatif_m": "denivele_negatif_m",
+            "nom": "name",
+        }
+        key = key_map.get(tri_par, tri_par)
+        results.sort(
+            key=lambda h: h.get(key) or 0,
+            reverse=tri_descendant,
+        )
+
+    # Limit
+    limite = min(max(1, limite), 100)
+    results = results[:limite]
+
+    return {"total_matches": total, "results": results}
 
 
 @tool
@@ -247,108 +318,66 @@ async def address_to_location_tool(lieu: str) -> dict:
     """Obtenir les coordonnées géographiques (latitude, longitude) d'un lieu.
 
     Utilise l'API Nominatim d'OpenStreetMap. Le lieu est un texte humain
-    (ex : 'gare de Grenoble', 'Col de Vence, Alpes-Maritimes') qui sera
-    automatiquement encodé en query string pour la requête.
-
+    (ex : 'gare de Grenoble', 'Place Victor Hugo, Grenoble').
 
     Args:
         lieu (str): Texte humain décrivant le lieu à géocoder.
-                       Exemples : 'gare de Grenoble', 'Col du Galibier, Savoie'
 
     Returns:
-        dict: Coordonnées du lieu ou dict d'erreur.
-        Exemple de succès :
-        {
-            "display_name": "Gare de Grenoble, Grenoble, Isère, France",
-            "lat": 45.1916,
-            "lon": 5.7167
-        }
-        Exemple d'erreur :
-        {"error": "Aucun résultat trouvé pour : 'xyz inexistant'"}
+        dict: Coordonnées du lieu {"display_name": ..., "lat": ..., "lon": ...} ou dict d'erreur.
     """
     API_BASE_URL = "https://nominatim.openstreetmap.org/search"
-    # Nominatim attend une query string encodée
-    params = {
-        "q": lieu,
-        "format": "json",
-        "limit": 1,
-    }
-    headers = {"User-Agent": BROWSER_USER_AGENT}
-    # ssl certif pour fix un problème de SSL sur les requetes de l'api qui me refusait, j'ai pas trouver d'autre solution que ce que chat a dit.
+    params = {"q": lieu, "format": "json", "limit": 1, "countrycodes": "fr"}
+    headers = {"User-Agent": "NeoRando-Hackathon/1.0"}
     ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-    logger.debug("[address_to_location_tool] Géocodage → '%s'", lieu)
+    logger.debug("[geocode] Géocodage → '%s'", lieu)
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(
-                API_BASE_URL,
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=10),
-                ssl=ssl_ctx,
+                API_BASE_URL, params=params,
+                timeout=aiohttp.ClientTimeout(total=10), ssl=ssl_ctx,
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
     except aiohttp.ClientError as e:
-        logger.error("[address_to_location_tool] Erreur de requête → %s", e)
         return {"error": f"Request error: {e!s}"}
 
     if not data:
-        logger.warning("[address_to_location_tool] Aucun résultat pour → '%s'", lieu)
         return {"error": f"Aucun résultat trouvé pour : '{lieu}'"}
 
     first = data[0]
-    result = {
+    return {
         "display_name": first.get("display_name", ""),
         "lat": float(first["lat"]),
         "lon": float(first["lon"]),
     }
-    logger.debug("[address_to_location_tool] Résultat → %s", result)
-    return result
 
 
 @tool
 def calcul_distance_vol_oiseau(
     lat1: float, lon1: float, lat2: float, lon2: float
 ) -> dict:
-    """Calcule la distance à vol d'oiseau (en km) entre deux points géographiques.
-
-    Utilise la formule de Haversine. Les coordonnées sont en degrés décimaux (WGS84).
+    """Calcule la distance à vol d'oiseau (en km) entre deux points GPS (formule de Haversine).
 
     Args:
-        lat1 (float): Latitude du point de départ en degrés décimaux (ex: 45.1916)
-        lon1 (float): Longitude du point de départ en degrés décimaux (ex: 5.7167)
-        lat2 (float): Latitude du point d'arrivée en degrés décimaux
-        lon2 (float): Longitude du point d'arrivée en degrés décimaux
+        lat1: Latitude du point 1 (degrés décimaux)
+        lon1: Longitude du point 1 (degrés décimaux)
+        lat2: Latitude du point 2 (degrés décimaux)
+        lon2: Longitude du point 2 (degrés décimaux)
 
     Returns:
-        dict: Distance en kilomètres.
-        Exemple de succès :
-        {"distance_km": 12.34}
-        Exemple d'erreur :
-        {"error": "Coordonnées invalides"}
+        dict: {"distance_km": float}
     """
-    import math
-
     try:
-        R = 6371.0  # Rayon de la Terre en km
+        R = 6371.0
         phi1, phi2 = math.radians(lat1), math.radians(lat2)
         dphi = math.radians(lat2 - lat1)
         dlambda = math.radians(lon2 - lon1)
-        a = (
-            math.sin(dphi / 2) ** 2
-            + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-        )
+        a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
         distance_km = 2 * R * math.asin(math.sqrt(a))
-        logger.debug(
-            "[calcul_distance_vol_oiseau] %.4f, %.4f → %.4f, %.4f = %.3f km",
-            lat1,
-            lon1,
-            lat2,
-            lon2,
-            distance_km,
-        )
+        logger.debug("[haversine] %.4f,%.4f → %.4f,%.4f = %.3f km", lat1, lon1, lat2, lon2, distance_km)
         return {"distance_km": round(distance_km, 3)}
     except Exception as e:
-        logger.error("[calcul_distance_vol_oiseau] Erreur → %s", e)
         return {"error": f"Coordonnées invalides : {e!s}"}
 
 
@@ -356,29 +385,20 @@ def calcul_distance_vol_oiseau(
 async def calculer_itineraire_routier(
     lat1: float, lon1: float, lat2: float, lon2: float
 ) -> dict:
-    """Calcule l'itinéraire routier (distance et durée) entre deux points géographiques via l'API IGN.
+    """Calcule l'itinéraire routier (distance et durée en voiture) entre deux points GPS.
 
-    Utilise le service data.geopf.fr avec le moteur OSRM (trajet voiture le plus rapide).
-    Les coordonnées sont en degrés décimaux (WGS84).
+    Utilise le service IGN/OSRM (gratuit, open source). Les coordonnées en degrés décimaux.
 
     Args:
-        lat1 (float): Latitude du point de départ en degrés décimaux (ex: 45.1916)
-        lon1 (float): Longitude du point de départ en degrés décimaux (ex: 5.7167)
-        lat2 (float): Latitude du point d'arrivée en degrés décimaux
-        lon2 (float): Longitude du point d'arrivée en degrés décimaux
+        lat1: Latitude du point de départ
+        lon1: Longitude du point de départ
+        lat2: Latitude du point d'arrivée
+        lon2: Longitude du point d'arrivée
 
     Returns:
-        dict: Distance et durée du trajet routier.
-        Exemple de succès :
-        {
-            "distance_km": 15.2,
-            "duree_minutes": 22.5
-        }
-        Exemple d'erreur :
-        {"error": "Impossible de calculer l'itinéraire"}
+        dict: {"distance_km": float, "duree_minutes": float} ou dict d'erreur
     """
     API_URL = "https://data.geopf.fr/navigation/itineraire"
-    # L'API attend les coordonnées au format "lon,lat" (pas lat,lon !)
     params = {
         "resource": "bdtopo-osrm",
         "start": f"{lon1},{lat1}",
@@ -391,61 +411,63 @@ async def calculer_itineraire_routier(
         "getBbox": "false",
     }
     ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-    logger.debug(
-        "[calculer_itineraire_routier] %.4f,%.4f → %.4f,%.4f", lat1, lon1, lat2, lon2
-    )
+    logger.debug("[route] %.4f,%.4f → %.4f,%.4f", lat1, lon1, lat2, lon2)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
-                API_URL,
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=15),
-                ssl=ssl_ctx,
+                API_URL, params=params,
+                timeout=aiohttp.ClientTimeout(total=15), ssl=ssl_ctx,
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
     except aiohttp.ClientError as e:
-        logger.error("[calculer_itineraire_routier] Erreur requête → %s", e)
         return {"error": f"Erreur requête : {e!s}"}
 
     try:
-        distance_km = round(float(data["distance"]), 3)
-        duree_minutes = round(float(data["duration"]), 2)
-        logger.debug(
-            "[calculer_itineraire_routier] distance=%.3f km, durée=%.2f min",
-            distance_km,
-            duree_minutes,
-        )
-        return {"distance_km": distance_km, "duree_minutes": duree_minutes}
+        return {
+            "distance_km": round(float(data["distance"]), 3),
+            "duree_minutes": round(float(data["duration"]), 2),
+        }
     except (KeyError, ValueError) as e:
-        logger.error(
-            "[calculer_itineraire_routier] Réponse inattendue → %s | data=%s", e, data
-        )
         return {"error": f"Réponse inattendue de l'API : {e!s}"}
 
 
+# ---------------------------------------------------------------------------
+# Agent setup
+# ---------------------------------------------------------------------------
+
 TOOLS = [
-    scraper_tool,
+    query_hikes_database,
     address_to_location_tool,
     calcul_distance_vol_oiseau,
     calculer_itineraire_routier,
+    scraper_tool,
 ]
 
-# Initialisation des LLMs et de l'agent
-# mini for reasoning, nano for structured output (AgentAnswer)
 llm_gpt5_mini = ChatOpenAI(model="gpt-5-mini", temperature=0)
 llm_gpt5_nano = ChatOpenAI(model="gpt-5-nano", temperature=0).with_structured_output(
     AgentAnswer
 )
 
+# Build system prompt with injected hike data
+_hikes_summary = _build_hikes_summary()
+
 SYSTEM_MESSAGE = (
-    "Tu es Neorando, un agent IA expert des randonnées autour de Grenoble. "
-    f"Ta mission est de répondre précisément et efficacement à toutes les questions concernant les randonnées, en utilisant des données issues du site officiel du tourisme de Grenoble. voici le lien : {SOURCE_URL} mais aussi des outils de scraping et de géocodage pour récupérer les informations nécessaires. "
-    "Pour chaque question, analyse le type de réponse attendue (texte, nombre, oui/non, liste) et fournis une réponse structurée selon le schéma fourni (un seul champ renseigné). "
-    "Ne demande jamais d'informations supplémentaires à l'utilisateur : récupère et traite les données toi-même. "
-    "Sois concis, exact, et veille à ce que ta réponse soit toujours reproductible. "
-    "Si une question fait référence à une randonnée ou une information déjà mentionnée, vérifie toujours les détails dans les données du site. "
-    "N'utilise pas de sources externes autres que le site officiel. "
+    "Tu es Neorando, un agent IA expert des randonnées autour de Grenoble.\n\n"
+    "## Données disponibles\n"
+    f"{_hikes_summary}\n\n"
+    "## Instructions\n"
+    "1. TOUJOURS chercher d'abord la réponse dans la base de données ci-dessus.\n"
+    "2. Utilise `query_hikes_database` pour filtrer, trier et agréger les données.\n"
+    "3. Pour les questions géographiques (distance à vol d'oiseau, itinéraire routier) :\n"
+    "   - Les coordonnées GPS des points de départ sont dans la base de données (champs latitude, longitude).\n"
+    "   - Utilise `address_to_location_tool` pour géocoder un lieu externe (gare, place, ville...).\n"
+    "   - Utilise `calcul_distance_vol_oiseau` pour la distance en ligne droite.\n"
+    "   - Utilise `calculer_itineraire_routier` pour la distance/durée en voiture.\n"
+    "4. N'utilise `scraper_tool` QUE si l'info n'est pas dans la base de données.\n"
+    "5. Sois concis et précis. Donne UNIQUEMENT la valeur demandée, sans phrase.\n"
+    "6. Pour les nombres, donne la valeur numérique exacte (pas d'arrondi inutile).\n"
+    "7. Pour les listes, donne les noms exacts des randonnées tels qu'ils apparaissent dans la base.\n"
 )
 
 agent = create_agent(
@@ -477,20 +499,18 @@ async def _answer_question_async(
         last_message = result["messages"][-1]
         logger.debug("[agent] Réponse brute de l'agent :\n%s", last_message.content)
         history += [HumanMessage(content=question), last_message]
-        # Formatage de la réponse en AgentAnswer via gpt-5-nano
-        # On passe la question ET la réponse de l'agent pour que nano
-        # sache quel champ remplir (answer, numeric, boolean ou items)
 
         formatting_prompt = HumanMessage(
             content=(
                 f"Question originale : {question}\n\n"
                 f"Réponse de l'agent : {last_message.content}\n\n"
                 "En te basant sur la question et la réponse ci-dessus, "
-                "remplis Exactement UN des quatre champs doit être renseigné selon le type de question :"
-                " - `answer`  → réponse textuelle (nom de randonnée, commune, point de départ, …)"
-                " - `numeric` → valeur numérique (distance, durée, nombre, dénivelé, …)"
-                " - `boolean` → oui / non"
-                " - `items`   → liste ordonnée de chaînes de caractères (noms de randonnées, communes, …)"
+                "remplis EXACTEMENT UN des quatre champs selon le type de question :\n"
+                " - `answer`  → réponse textuelle (nom de randonnée, commune, point de départ, …)\n"
+                " - `numeric` → valeur numérique (distance, durée, nombre, dénivelé, …)\n"
+                " - `boolean` → oui / non\n"
+                " - `items`   → liste ordonnée de chaînes de caractères (noms de randonnées, communes, …)\n"
+                "IMPORTANT : ne mets que la valeur brute, pas de phrase."
             )
         )
         return await llm_gpt5_nano.ainvoke([formatting_prompt])
