@@ -375,7 +375,7 @@ def calcul_distance_vol_oiseau(
         dlambda = math.radians(lon2 - lon1)
         a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
         distance_km = 2 * R * math.asin(math.sqrt(a))
-        logger.debug("[haversine] %.4f,%.4f → %.4f,%.4f = %.3f km", lat1, lon1, lat2, lon2, distance_km)
+        logger.debug("[haversine] %.7f,%.7f → %.7f,%.7f = %.3f km", lat1, lon1, lat2, lon2, distance_km)
         return {"distance_km": round(distance_km, 3)}
     except Exception as e:
         return {"error": f"Coordonnées invalides : {e!s}"}
@@ -471,7 +471,7 @@ SYSTEM_MESSAGE = (
 )
 
 agent = create_agent(
-    llm_gpt5_mini, tools=TOOLS, system_prompt=SYSTEM_MESSAGE, debug=True
+    llm_gpt5_mini, tools=TOOLS, system_prompt=SYSTEM_MESSAGE, debug=False
 )
 
 
