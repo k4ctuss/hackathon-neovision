@@ -104,12 +104,16 @@ def _parse_duration_minutes(text: str) -> float | None:
 
 
 def parse_hike_page(html: str, url: str) -> dict:
-    """Parse a detail page HTML into a structured hike dict."""
+    """Parse a detail page HTML into a structured hike dict.
+
+    Uses the structured DOM (dl/dt/dd in track-section and strucutre-adresse)
+    rather than fragile line-by-line text parsing.
+    """
     soup = BeautifulSoup(html, "html.parser")
 
-    # Remove noise
-    for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "iframe"]):
-        tag.decompose()
+    # Detect 404 pages
+    if soup.find(string=re.compile(r"page.*introuvable|n.a pas été trouvée", re.I)):
+        return {}
 
     # Name
     h1 = soup.find("h1")
@@ -131,116 +135,124 @@ def parse_hike_page(html: str, url: str) -> dict:
         "longitude": None,
     }
 
-    full_text = soup.get_text(separator="\n", strip=True)
-    lines = full_text.split("\n")
+    # ------------------------------------------------------------------
+    # 1) Characteristics from the track-section <dl>
+    # ------------------------------------------------------------------
+    track_section = soup.find("div", class_="track-section")
+    if track_section:
+        dl = track_section.find("dl")
+        if dl:
+            dts = dl.find_all("dt")
+            dds = dl.find_all("dd")
+            for dt, dd in zip(dts, dds):
+                label = dt.get_text(strip=True).lower()
+                value = dd.get_text(strip=True)
 
-    for i, line in enumerate(lines):
-        lo = line.lower().strip()
+                if "distance" in label:
+                    hike["distance_km"] = _parse_float(value)
 
-        # Commune — often after a label or near zip code
-        if not hike["commune"]:
-            # Pattern: "COMMUNE (38xxx)" or just commune name near zip
-            zip_match = re.search(r"(\d{5})\s+(.+)", line.strip())
-            if zip_match and zip_match.group(1).startswith("38"):
-                hike["commune"] = zip_match.group(2).strip()
-            elif re.match(r"^[A-Z\s\-]+$", line.strip()) and len(line.strip()) > 2 and len(line.strip()) < 40:
-                # All-caps line might be commune name (like "CORENC")
-                if i > 0 and any(kw in lines[i - 1].lower() for kw in ["commune", "localisation"]):
-                    hike["commune"] = line.strip().title()
+                elif "nivellation positive" in label or "nivelé positif" in label:
+                    hike["denivele_positif_m"] = _parse_float(value)
 
-        # Distance
-        if "distance" in lo and not hike["distance_km"]:
-            val = _parse_float(lo.split("distance")[-1])
-            if val and val < 500:
-                hike["distance_km"] = val
-        elif not hike["distance_km"]:
-            km_match = re.match(r"^([\d,\.]+)\s*km$", line.strip())
-            if km_match:
-                hike["distance_km"] = _parse_float(km_match.group(1))
+                elif "nivellation négative" in label or "nivelé négatif" in label:
+                    hike["denivele_negatif_m"] = _parse_float(value)
 
-        # Duration
-        if ("durée" in lo or "duree" in lo) and not hike["duree_min"]:
-            hike["duree_min"] = _parse_duration_minutes(lo)
-        elif not hike["duree_min"] and re.match(r"^\d+\s*h(\s*\d+)?$", line.strip().lower()):
-            hike["duree_min"] = _parse_duration_minutes(line)
+                elif "durée" in label or "duree" in label:
+                    hike["duree_min"] = _parse_duration_minutes(value)
 
-        # Dénivelé positif
-        if "dénivellation positive" in lo or "dénivelé positif" in lo or "denivele positif" in lo:
-            val = _parse_float(lo)
-            if val:
-                hike["denivele_positif_m"] = val
-        elif "dénivellation" in lo and "positif" in lo:
-            val = _parse_float(lo)
-            if val:
-                hike["denivele_positif_m"] = val
+                elif "niveau" in label:
+                    # e.g. "Niveau noir - Très difficile", "Niveau bleu - Facile"
+                    m = re.search(r"[-–]\s*(.+)", value)
+                    if m:
+                        hike["difficulte"] = m.group(1).strip()
+                    else:
+                        hike["difficulte"] = value.strip()
 
-        # Dénivelé négatif
-        if "dénivellation négative" in lo or "dénivelé négatif" in lo:
-            val = _parse_float(lo)
-            if val:
-                hike["denivele_negatif_m"] = val
+                elif "type" in label:
+                    hike["type_parcours"] = value.strip()
 
-        # Difficulté
-        if "niveau" in lo and not hike["difficulte"]:
-            diff_match = re.search(r"niveau\s+\w+\s*[-–]\s*(\w+)", lo)
-            if diff_match:
-                hike["difficulte"] = diff_match.group(1).capitalize()
+    # ------------------------------------------------------------------
+    # 2) Address section (class="strucutre-adresse" — typo in site HTML)
+    # ------------------------------------------------------------------
+    addr_div = soup.find("div", class_="strucutre-adresse")
+    if addr_div:
+        first_dd = addr_div.find("dd")
+        if first_dd:
+            # Departure: look for <p> containing "Départ"
+            for p in first_dd.find_all("p"):
+                p_text = p.get_text(strip=True)
+                depart_match = re.split(r"[Dd]épart\s*:?\s*", p_text)
+                if len(depart_match) > 1 and depart_match[-1].strip():
+                    hike["depart"] = depart_match[-1].strip()
+                    break
+            # If no explicit "Départ" label, second <p> is often the departure
+            if not hike["depart"]:
+                ps = first_dd.find_all("p")
+                if len(ps) >= 2:
+                    candidate = ps[1].get_text(strip=True)
+                    if candidate and len(candidate) < 100:
+                        hike["depart"] = candidate
 
-        # Type de parcours
-        if not hike["type_parcours"]:
-            for tp in ["boucle", "aller-retour", "itinérance", "aller retour"]:
-                if tp in lo:
-                    hike["type_parcours"] = tp.replace("aller retour", "Aller-retour").title()
+            # Commune: from the bare text "38xxx COMMUNE-NAME"
+            dd_text = first_dd.get_text(separator="\n", strip=True)
+            for line in dd_text.split("\n"):
+                zip_match = re.match(r"(\d{5})\s+(.+)", line.strip())
+                if zip_match and zip_match.group(1).startswith("38"):
+                    hike["commune"] = zip_match.group(2).strip()
                     break
 
-        # Point de départ
-        if ("départ" in lo or "depart" in lo) and not hike["depart"]:
-            parts = re.split(r"(?:départ|depart)\s*:?\s*", line, flags=re.IGNORECASE)
-            if len(parts) > 1 and parts[-1].strip():
-                hike["depart"] = parts[-1].strip()
-
-        # Animaux
-        if "animaux acceptés" in lo or "animaux autorisés" in lo:
+    # ------------------------------------------------------------------
+    # 3) Animaux — look in <li> tags
+    # ------------------------------------------------------------------
+    for li in soup.find_all("li"):
+        li_text = li.get_text(strip=True).lower()
+        if "animaux acceptés" in li_text or "animaux autorisés" in li_text:
             hike["animaux_acceptes"] = True
-        elif "animaux refusés" in lo or "animaux non" in lo or "animaux interdits" in lo:
+            break
+        elif "animaux refusés" in li_text or "animaux non" in li_text or "animaux interdits" in li_text:
             hike["animaux_acceptes"] = False
-
-    # GPS — look in the original HTML (before decompose), so re-parse
-    raw_soup = BeautifulSoup(html, "html.parser")
-    for script in raw_soup.find_all("script"):
-        st = script.string or ""
-        lat_m = re.search(r'"latitude"[:\s]*([\d.]+)', st)
-        lon_m = re.search(r'"longitude"[:\s]*([\d.]+)', st)
-        if lat_m and lon_m:
-            hike["latitude"] = float(lat_m.group(1))
-            hike["longitude"] = float(lon_m.group(1))
             break
 
-    # Also check meta tags and data attributes
+    # ------------------------------------------------------------------
+    # 4) GPS coordinates — from Google Maps link, scripts, or meta tags
+    # ------------------------------------------------------------------
+    # Best source: the Google Maps link in the address section
+    gps_link = soup.find("a", class_="gps", href=True)
+    if gps_link:
+        coords_match = re.search(r"daddr=([\d.]+),([\d.]+)", gps_link["href"])
+        if coords_match:
+            hike["latitude"] = float(coords_match.group(1))
+            hike["longitude"] = float(coords_match.group(2))
+
+    # Fallback: scripts with JSON latitude/longitude
     if not hike["latitude"]:
-        for meta in raw_soup.find_all("meta"):
+        for script in soup.find_all("script"):
+            st = script.string or ""
+            lat_m = re.search(r'"latitude"[:\s]*([\d.]+)', st)
+            lon_m = re.search(r'"longitude"[:\s]*([\d.]+)', st)
+            if lat_m and lon_m:
+                hike["latitude"] = float(lat_m.group(1))
+                hike["longitude"] = float(lon_m.group(1))
+                break
+
+    # Fallback: meta tags
+    if not hike["latitude"]:
+        for meta in soup.find_all("meta"):
             content = meta.get("content", "")
-            if "latitude" in str(meta.get("property", "")).lower():
+            prop = str(meta.get("property", "")).lower()
+            if "latitude" in prop:
                 hike["latitude"] = _parse_float(content)
-            if "longitude" in str(meta.get("property", "")).lower():
+            if "longitude" in prop:
                 hike["longitude"] = _parse_float(content)
 
-    # Check for geo coordinates in text
-    if not hike["latitude"]:
-        geo_match = re.search(
-            r"latitude[:\s]*([\d.]+).*?longitude[:\s]*([\d.]+)",
-            full_text,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if geo_match:
-            hike["latitude"] = float(geo_match.group(1))
-            hike["longitude"] = float(geo_match.group(2))
-
-    # Fallback commune detection from text
+    # ------------------------------------------------------------------
+    # 5) Fallback commune from full text if not found in address section
+    # ------------------------------------------------------------------
     if not hike["commune"]:
-        commune_match = re.search(r"(\d{5})\s+([A-ZÀ-Ü\s\-]+)", full_text)
+        full_text = soup.get_text(separator="\n", strip=True)
+        commune_match = re.search(r"(\d{5})\s+([A-ZÀ-Ü\s\-]{3,40})", full_text)
         if commune_match:
-            hike["commune"] = commune_match.group(2).strip().title()
+            hike["commune"] = commune_match.group(2).strip()
 
     return hike
 
