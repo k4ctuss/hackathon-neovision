@@ -3,6 +3,8 @@ data/*
 !data/questions*
 !data/expected_answers*
 notebooks/
+output/
+submission*
 
 ### Python ###
 # Byte-compiled / optimized / DLL files

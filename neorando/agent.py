@@ -10,7 +10,6 @@ en entrée et retourne une instance de `AgentAnswer`.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import math
@@ -38,7 +37,9 @@ from playwright.async_api import (
 )
 from playwright_stealth import Stealth
 
+from neorando.async_runtime import run_async
 from neorando.schemas import AgentAnswer
+from neorando.utils import normalize_for_filtering
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -56,6 +57,9 @@ SOURCE_URL = "https://www.grenoble-tourisme.com/fr/faire/randonner/a-pied/"
 CACHE_PATH = Path(__file__).parent.parent / "data" / "hikes.json"
 _HIKES_DATA: list[dict] = []
 
+LLM_TIMEOUT_SECONDS = 60
+LLM_MAX_RETRIES = 2
+
 
 def _load_cached_hikes() -> list[dict]:
     """Load pre-scraped hike data from cache file."""
@@ -71,33 +75,6 @@ def _load_cached_hikes() -> list[dict]:
     return _HIKES_DATA
 
 
-def _build_hikes_summary() -> str:
-    """Build a compact summary of all hikes for the system prompt."""
-    hikes = _load_cached_hikes()
-    if not hikes:
-        return "AUCUNE DONNÉE DE RANDONNÉE DISPONIBLE. Utilise le scraper_tool pour récupérer les données du site."
-
-    lines = [f"BASE DE DONNÉES DES RANDONNÉES ({len(hikes)} randonnées au total) :"]
-    lines.append("Format: #ID | Nom | Commune | Départ | Distance(km) | Durée(min) | D+(m) | D-(m) | Difficulté | Type | Animaux | Lat,Lon | URL")
-    lines.append("-" * 40)
-
-    for i, h in enumerate(hikes):
-        lat = h.get("latitude") or ""
-        lon = h.get("longitude") or ""
-        coords = f"{lat},{lon}" if lat and lon else "?"
-        animaux = "oui" if h.get("animaux_acceptes") is True else ("non" if h.get("animaux_acceptes") is False else "?")
-        line = (
-            f"#{i} | {h.get('name', '?')} | {h.get('commune', '?')} | "
-            f"{h.get('depart', '?')} | {h.get('distance_km', '?')} | "
-            f"{h.get('duree_min', '?')} | {h.get('denivele_positif_m', '?')} | "
-            f"{h.get('denivele_negatif_m', '?')} | {h.get('difficulte', '?')} | "
-            f"{h.get('type_parcours', '?')} | {animaux} | {coords} | {h.get('url', '')}"
-        )
-        lines.append(line)
-
-    return "\n".join(lines)
-
-
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -107,6 +84,61 @@ BROWSER_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
+
+
+AVAILABLE_LABELS = [
+    "hike_id",
+    "name",
+    "url",
+    "address",
+    "code_postal",
+    "depart",
+    "distance_km",
+    "duree_min",
+    "denivele_positif_m",
+    "denivele_negatif_m",
+    "difficulte",
+    "type_parcours",
+    "animal_accepted",
+    "has_gpx",
+    "gpx_url",
+    "tarif",
+    "opening_period",
+    "latitude",
+    "longitude",
+]
+
+LABEL_ALIASES = {
+    "id": "hike_id",
+    "commune": "address",
+    "adresse": "address",
+    "adress": "address",
+    "animaux_acceptes": "animal_accepted",
+    "animal": "animal_accepted",
+    "animals": "animal_accepted",
+    "gpx": "gpx_url",
+}
+
+
+def _normalize_label(label: str) -> str:
+    key = label.strip()
+    return LABEL_ALIASES.get(key, key)
+
+
+def _get_hike_value(hike: dict, label: str) -> Any:
+    if label == "address":
+        return hike.get("address") or hike.get("commune")
+    if label == "animal_accepted":
+        value = hike.get("animal_accepted")
+        if value is None:
+            value = hike.get("animaux_acceptes")
+        return value
+    if label == "has_gpx":
+        value = hike.get("has_gpx")
+        if value is None:
+            return bool(hike.get("gpx_url"))
+        return value
+    return hike.get(label)
 
 
 @tool
@@ -236,81 +268,141 @@ async def scraper_tool(
 
 @tool
 def query_hikes_database(
+    select_labels: list[str] | None = None,
+    filtre_hike_id: int | None = None,
     filtre_nom: str | None = None,
-    filtre_commune: str | None = None,
+    filtre_adresse_contient: str | None = None,
     filtre_difficulte: str | None = None,
     filtre_type: str | None = None,
-    filtre_animaux: bool | None = None,
+    filtre_animal_accepted: bool | None = None,
+    filtre_has_gpx: bool | None = None,
     tri_par: str | None = None,
     tri_descendant: bool = True,
-    limite: int = 10,
+    limite: int | None = None,
 ) -> dict:
-    """Recherche et filtre les randonnées dans la base de données locale pré-scrapée.
+    """Récupère des randonnées depuis le cache JSON avec projection des labels et filtres ciblés.
 
-    Utilise cette fonction pour trouver des randonnées selon divers critères, faire des agrégations,
-    des classements, etc. C'est TOUJOURS le premier outil à utiliser avant de scraper le web.
+    Workflow recommandé:
+    1) Appeler ce tool avec un `select_labels` minimal (par défaut: `hike_id`, `name`).
+    2) Ajouter des filtres (`filtre_nom`, `filtre_adresse_contient`, `filtre_has_gpx`, etc.).
+    3) Trier/limiter si besoin.
+    4) N'utiliser `scraper_tool` que si le cache ne contient pas l'information.
 
-    Args:
-        filtre_nom: Filtre par nom de randonnée (recherche partielle, insensible à la casse)
-        filtre_commune: Filtre par commune (recherche partielle, insensible à la casse)
-        filtre_difficulte: Filtre par difficulté exacte ("Facile", "Modéré", "Difficile", "Très difficile")
-        filtre_type: Filtre par type de parcours ("Boucle", "Aller-retour", "Itinérance")
-        filtre_animaux: Filtre par acceptation des animaux (true = acceptés, false = refusés)
-        tri_par: Champ de tri ("distance_km", "duree_min", "denivele_positif_m", "denivele_negatif_m", "nom")
-        tri_descendant: Tri descendant (true) ou ascendant (false). Par défaut descendant.
-        limite: Nombre max de résultats à retourner (défaut 10, max 100)
+    Labels disponibles:
+    hike_id, name, url, address, code_postal, depart, distance_km, duree_min,
+    denivele_positif_m, denivele_negatif_m, difficulte, type_parcours,
+    animal_accepted, has_gpx, gpx_url, tarif, opening_period, latitude, longitude.
 
     Returns:
-        dict avec "total_matches" (nombre total avant limite), "results" (liste des randonnées matchées)
+        dict avec:
+        - `total_lines`: nombre total de lignes après filtres (avant limite)
+        - `selected_lines`: lignes projetées selon `select_labels`
     """
+    
+    logger.debug("[db query] select=%s, filters={hike_id:%s, nom:%s, adresse_contient:%s, difficulte:%s, type:%s, animal_accepted:%s, has_gpx:%s}, tri_par=%s, tri_descendant=%s, limite=%s",
+        select_labels, filtre_hike_id, filtre_nom, filtre_adresse_contient,
+        filtre_difficulte, filtre_type, filtre_animal_accepted, filtre_has_gpx,
+        tri_par, tri_descendant, limite
+    )
     hikes = _load_cached_hikes()
     if not hikes:
         return {"error": "Base de données vide. Lancer 'uv run neorando scrape' d'abord."}
 
+
+
+    normalized_labels: list[str] = []
+    if(select_labels is not None):
+        for label in select_labels:
+            normalized = _normalize_label(label)
+            if normalized in AVAILABLE_LABELS and normalized not in normalized_labels:
+                normalized_labels.append(normalized)
+    
+    # Assurer les labels de base pour l'identification
+    for h in ["hike_id", "name"]:
+        if h not in normalized_labels:
+            normalized_labels.append(h)
+
+
     results = list(hikes)
 
     # Apply filters
-    if filtre_nom:
-        fn = filtre_nom.lower()
-        results = [h for h in results if fn in (h.get("name") or "").lower()]
+    if filtre_hike_id is not None:
+        results = [h for h in results if _get_hike_value(h, "hike_id") == filtre_hike_id]
 
-    if filtre_commune:
-        fc = filtre_commune.lower()
-        results = [h for h in results if fc in (h.get("commune") or "").lower()]
+    if filtre_nom:
+        fn = normalize_for_filtering(filtre_nom)
+        results = [
+            h for h in results
+            if fn in normalize_for_filtering(h.get("name"))
+        ]
+
+    if filtre_adresse_contient:
+        fa = normalize_for_filtering(filtre_adresse_contient)
+        results = [
+            h for h in results
+            if fa in normalize_for_filtering(_get_hike_value(h, "address"))
+        ]
 
     if filtre_difficulte:
-        fd = filtre_difficulte.lower()
-        results = [h for h in results if fd in (h.get("difficulte") or "").lower()]
+        fd = normalize_for_filtering(filtre_difficulte)
+        results = [
+            h for h in results
+            if fd in normalize_for_filtering(h.get("difficulte"))
+        ]
 
     if filtre_type:
-        ft = filtre_type.lower()
-        results = [h for h in results if ft in (h.get("type_parcours") or "").lower()]
+        ft = normalize_for_filtering(filtre_type)
+        results = [
+            h for h in results
+            if ft in normalize_for_filtering(h.get("type_parcours"))
+        ]
 
-    if filtre_animaux is not None:
-        results = [h for h in results if h.get("animaux_acceptes") == filtre_animaux]
+    if filtre_animal_accepted is not None:
+        results = [
+            h for h in results
+            if _get_hike_value(h, "animal_accepted") == filtre_animal_accepted
+        ]
+
+    if filtre_has_gpx is not None:
+        results = [h for h in results if _get_hike_value(h, "has_gpx") == filtre_has_gpx]
 
     total = len(results)
 
     # Sort
     if tri_par:
         key_map = {
+            "hike_id": "hike_id",
             "distance_km": "distance_km",
             "duree_min": "duree_min",
             "denivele_positif_m": "denivele_positif_m",
             "denivele_negatif_m": "denivele_negatif_m",
             "nom": "name",
+            "name": "name",
+            "address": "address",
+            "difficulte": "difficulte",
+            "type": "type_parcours",
+            "animal_accepted": "animal_accepted",
+            "has_gpx": "has_gpx",
         }
-        key = key_map.get(tri_par, tri_par)
+        key = _normalize_label(key_map.get(tri_par, tri_par))
         results.sort(
-            key=lambda h: h.get(key) or 0,
+            key=lambda h: _get_hike_value(h, key) or 0,
             reverse=tri_descendant,
         )
 
     # Limit
+    if limite is None:
+        limite = len(results)
     limite = min(max(1, limite), 100)
     results = results[:limite]
 
-    return {"total_matches": total, "results": results}
+    selected_lines = [
+        {label: _get_hike_value(hike, label) for label in normalized_labels}
+        for hike in results
+    ]
+    logger.debug("[db query] total_lines=%d, query answer %s", total, json.dumps(selected_lines, ensure_ascii=False))
+
+    return {"total_lines": total, "selected_lines": selected_lines}
 
 
 @tool
@@ -444,30 +536,30 @@ TOOLS = [
     scraper_tool,
 ]
 
-llm_gpt5_mini = ChatOpenAI(model="gpt-5-mini", temperature=0)
-llm_gpt5_nano = ChatOpenAI(model="gpt-5-nano", temperature=0).with_structured_output(
-    AgentAnswer
+llm_gpt5_mini = ChatOpenAI(
+    model="gpt-5-mini",
+    temperature=0,
+    timeout=LLM_TIMEOUT_SECONDS,
+    max_retries=LLM_MAX_RETRIES,
 )
-
-# Build system prompt with injected hike data
-_hikes_summary = _build_hikes_summary()
+llm_gpt5_nano = ChatOpenAI(
+    model="gpt-5-nano",
+    temperature=0,
+    timeout=LLM_TIMEOUT_SECONDS,
+    max_retries=LLM_MAX_RETRIES,
+).with_structured_output(AgentAnswer)
 
 SYSTEM_MESSAGE = (
     "Tu es Neorando, un agent IA expert des randonnées autour de Grenoble.\n\n"
-    "## Données disponibles\n"
-    f"{_hikes_summary}\n\n"
-    "## Instructions\n"
-    "1. TOUJOURS chercher d'abord la réponse dans la base de données ci-dessus.\n"
-    "2. Utilise `query_hikes_database` pour filtrer, trier et agréger les données.\n"
-    "3. Pour les questions géographiques (distance à vol d'oiseau, itinéraire routier) :\n"
-    "   - Les coordonnées GPS des points de départ sont dans la base de données (champs latitude, longitude).\n"
-    "   - Utilise `address_to_location_tool` pour géocoder un lieu externe (gare, place, ville...).\n"
-    "   - Utilise `calcul_distance_vol_oiseau` pour la distance en ligne droite.\n"
-    "   - Utilise `calculer_itineraire_routier` pour la distance/durée en voiture.\n"
-    "4. N'utilise `scraper_tool` QUE si l'info n'est pas dans la base de données.\n"
-    "5. Sois concis et précis. Donne UNIQUEMENT la valeur demandée, sans phrase.\n"
-    "6. Pour les nombres, donne la valeur numérique exacte (pas d'arrondi inutile).\n"
-    "7. Pour les listes, donne les noms exacts des randonnées tels qu'ils apparaissent dans la base.\n"
+    "## Stratégie de récupération des données\n"
+    "1. TOUJOURS commencer par `query_hikes_database`.\n"
+    "2. Commencer avec un `select_labels` minimal. Par défaut ce tool renvoie `hike_id` et `name`.\n"
+    "3. Ajouter ensuite seulement les labels nécessaires à la question (ex: `distance_km`, `opening_period`, `gpx_url`).\n"
+    "4. Utiliser les filtres du tool: `filtre_hike_id`, `filtre_nom`, `filtre_adresse_contient`, `filtre_difficulte`, `filtre_type`, `filtre_animal_accepted`, `filtre_has_gpx`.\n"
+    "5. Le tool retourne `total_lines` (avant limite) et `selected_lines` (lignes projetées).\n"
+    "6. Pour les questions géographiques, utiliser `address_to_location_tool`, `calcul_distance_vol_oiseau`, `calculer_itineraire_routier`.\n"
+    "7. N'utiliser `scraper_tool` QUE si le cache JSON ne contient pas l'information demandée.\n"
+    "8. Répondre avec la valeur brute demandée, sans phrase superflue.\n"
 )
 
 agent = create_agent(
@@ -485,7 +577,7 @@ def answer_question(question: str, history: List[BaseMessage]) -> AgentAnswer:
         AgentAnswer: La réponse structurée, avec exactement UN des champs
         `answer`, `numeric`, `boolean` ou `items` renseigné.
     """
-    return asyncio.run(_answer_question_async(question, history))
+    return run_async(_answer_question_async(question, history))
 
 
 async def _answer_question_async(
@@ -506,11 +598,11 @@ async def _answer_question_async(
                 f"Réponse de l'agent : {last_message.content}\n\n"
                 "En te basant sur la question et la réponse ci-dessus, "
                 "remplis EXACTEMENT UN des quatre champs selon le type de question :\n"
-                " - `answer`  → réponse textuelle (nom de randonnée, commune, point de départ, …)\n"
-                " - `numeric` → valeur numérique (distance, durée, nombre, dénivelé, …)\n"
-                " - `boolean` → oui / non\n"
+                " - `answer`  → réponse textuelle (nom de randonnée, commune, code postal, point de départ,  ou autre réponse à une question ouverte)\n"
+                " - `numeric` → valeur numérique (distance, durée, dénivelé, …valeur issue d'un calcul, ...)\n"
+                " - `boolean` → true / false\n"
                 " - `items`   → liste ordonnée de chaînes de caractères (noms de randonnées, communes, …)\n"
-                "IMPORTANT : ne mets que la valeur brute, pas de phrase."
+                "IMPORTANT : ne mets que la valeur brute, pas de phrase. Si la question demande une liste, utilise `items`. Si la question demande une valeur numérique ou booléenne, utilise `numeric` ou `boolean`. Sinon, utilise `answer`. Par exemple le code postal est une `answer` (texte), pas un `numeric`."
             )
         )
         return await llm_gpt5_nano.ainvoke([formatting_prompt])

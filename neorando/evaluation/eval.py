@@ -86,7 +86,9 @@ def eval_submission(
         answer_type: str = exp["answer_type"]
         expected_val = exp["expected"]
         comparison: str = exp.get("comparison", "fuzzy")
-        tolerance: float = exp.get("tolerance") or 0.05
+        tolerance: float = (
+            exp.get("tolerance") if exp.get("tolerance") is not None else 0.05
+        )
         ordered: bool = exp.get("ordered", False)
         field: str = FIELD_KEY.get(answer_type, "answer")
 
@@ -114,14 +116,23 @@ def eval_submission(
             elif not isinstance(actual, list):
                 actual = None
 
-        score = compare(
-            actual,
-            expected_val,
-            answer_type=answer_type,
-            comparison=comparison,
-            tolerance=tolerance,
-            ordered=ordered,
-        )
+        # Support multi-réponses : "alternatives" contient d'autres valeurs
+        # acceptées. On prend le meilleur score parmi expected + alternatives.
+        candidates = [expected_val] + exp.get("alternatives", [])
+        best_score = 0.0
+        best_expected = expected_val
+        for candidate in candidates:
+            s = compare(
+                actual,
+                candidate,
+                answer_type=answer_type,
+                comparison=comparison,
+                tolerance=tolerance,
+                ordered=ordered,
+            )
+            if s > best_score:
+                best_score = s
+                best_expected = candidate
 
         scores.append(
             {
@@ -129,8 +140,8 @@ def eval_submission(
                 "query": row.get("query", ""),
                 "answer_type": answer_type,
                 "actual": actual,
-                "expected": expected_val,
-                "score": round(score, 4),
+                "expected": best_expected,
+                "score": round(best_score, 4),
             }
         )
 
@@ -160,13 +171,17 @@ def print_results(results: dict[str, Any]) -> None:
     print(f"{'=' * 60}")
 
     # Questions réussies / échouées
-    passed = [s for s in results["scores"] if s["score"] >= 0.5]
+    perfect = [s for s in results["scores"] if s["score"] >= 1.0]
+    partial = [s for s in results["scores"] if 0.5 <= s["score"] < 1.0]
     failed = [s for s in results["scores"] if s["score"] < 0.5]
-    print(f"\n  ✅ Réussies : {len(passed)}   ❌ Échouées : {len(failed)}")
+    print(
+        f"\n  ✅ Parfaites : {len(perfect)}   ⚠️  Partielles : {len(partial)}   ❌ Échouées : {len(failed)}"
+    )
 
-    if failed:
-        print(f"\n❌ Questions échouées ({len(failed)}) :")
-        for s in failed:
+    imperfect = [s for s in results["scores"] if s["score"] < 1.0]
+    if imperfect:
+        print(f"\n❌ Questions non parfaites ({len(imperfect)}) :")
+        for s in sorted(imperfect, key=lambda x: x["score"]):
             print(f"  [{s['index']:2d}] score={s['score']:.2f}  {s['query'][:70]}")
             print(f"       attendu : {s['expected']}")
             print(f"       obtenu  : {s['actual']}")

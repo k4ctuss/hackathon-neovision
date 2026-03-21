@@ -279,12 +279,11 @@ def scrape_cmd() -> None:
     À lancer UNE FOIS avant d'utiliser l'agent. Les données seront ensuite
     chargées automatiquement par l'agent pour répondre aux questions.
     """
-    import asyncio
-
+    from neorando.async_runtime import run_async
     from neorando.scraper import CACHE_PATH, scrape_and_save
 
     click.echo("🔍 Scraping de toutes les randonnées en cours...")
-    hikes = asyncio.run(scrape_and_save())
+    hikes = run_async(scrape_and_save())
     click.echo(f"✅ {len(hikes)} randonnées sauvegardées dans {CACHE_PATH}")
 
     # Quick summary

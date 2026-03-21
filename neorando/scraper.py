@@ -13,6 +13,8 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
+from neorando.utils import extract_hike_id_from_url, normalize_scraped_text
+
 logger = logging.getLogger(__name__)
 
 SOURCE_URL = "https://www.grenoble-tourisme.com/fr/faire/randonner/a-pied/"
@@ -34,7 +36,11 @@ async def get_all_hike_urls() -> list[str]:
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+            ],
         )
         context = await browser.new_context(
             viewport={"width": 1920, "height": 1080},
@@ -48,7 +54,9 @@ async def get_all_hike_urls() -> list[str]:
             list_url = f"{SOURCE_URL}?page={page_num}" if page_num > 1 else SOURCE_URL
             logger.info("Listing page %d: %s", page_num, list_url)
             try:
-                resp = await page.goto(list_url, wait_until="domcontentloaded", timeout=30000)
+                resp = await page.goto(
+                    list_url, wait_until="domcontentloaded", timeout=30000
+                )
                 if resp and resp.status == 200:
                     try:
                         await page.wait_for_load_state("networkidle", timeout=5000)
@@ -103,6 +111,18 @@ def _parse_duration_minutes(text: str) -> float | None:
     return total if total > 0 else None
 
 
+def _clean_multiline_text(container: BeautifulSoup | None) -> str | None:
+    """Extract normalized text from paragraphs within a container."""
+    if container is None:
+        return None
+    parts = [p.get_text(" ", strip=True) for p in container.find_all("p")]
+    if not parts:
+        raw = container.get_text(" ", strip=True)
+        return raw or None
+    text = "\n".join(part for part in parts if part)
+    return text or None
+
+
 def parse_hike_page(html: str, url: str) -> dict:
     """Parse a detail page HTML into a structured hike dict.
 
@@ -120,9 +140,11 @@ def parse_hike_page(html: str, url: str) -> dict:
     name = " ".join((h1.get_text(strip=True) if h1 else "").split())
 
     hike: dict = {
+        "hike_id": extract_hike_id_from_url(url),
         "name": name,
         "url": url,
-        "commune": None,
+        "address": None,
+        "code_postal": None,
         "depart": None,
         "distance_km": None,
         "duree_min": None,
@@ -130,7 +152,11 @@ def parse_hike_page(html: str, url: str) -> dict:
         "denivele_negatif_m": None,
         "difficulte": None,
         "type_parcours": None,
-        "animaux_acceptes": None,
+        "animal_accepted": None,
+        "tarif": None,
+        "opening_period": None,
+        "has_gpx": False,
+        "gpx_url": None,
         "latitude": None,
         "longitude": None,
     }
@@ -173,12 +199,48 @@ def parse_hike_page(html: str, url: str) -> dict:
                     hike["type_parcours"] = value.strip()
 
     # ------------------------------------------------------------------
+    # 1b) Tarifs / opening period from activity boxes
+    # ------------------------------------------------------------------
+    # Common page structure:
+    # <div class="box-wrapper box-top">
+    #   <h2 class="title">Tarifs</h2>
+    #   <div class="col-content">...</div>
+    # </div>
+    # and
+    # <h2 class="title">Périodes d'ouverture</h2>
+    for box in soup.select("div.box-wrapper.box-top"):
+        title_el = box.find("h2", class_="title")
+        if not title_el:
+            continue
+        title = title_el.get_text(" ", strip=True).lower()
+
+        content = box.find("div", class_="textual-prices") or box.find(
+            "div", class_="col-content"
+        )
+        content_text = _clean_multiline_text(content)
+        if not content_text:
+            continue
+
+        if "tarif" in title and not hike["tarif"]:
+            hike["tarif"] = content_text
+        elif "période" in title or "periode" in title or "ouverture" in title:
+            if not hike["opening_period"]:
+                hike["opening_period"] = content_text
+
+    # ------------------------------------------------------------------
     # 2) Address section (class="strucutre-adresse" — typo in site HTML)
     # ------------------------------------------------------------------
     addr_div = soup.find("div", class_="strucutre-adresse")
     if addr_div:
         first_dd = addr_div.find("dd")
         if first_dd:
+            dd_text = first_dd.get_text(separator="\n", strip=True)
+            address_lines = [
+                line.strip() for line in dd_text.split("\n") if line.strip()
+            ]
+            if address_lines:
+                hike["address"] = " | ".join(address_lines)
+
             # Departure: look for <p> containing "Départ"
             for p in first_dd.find_all("p"):
                 p_text = p.get_text(strip=True)
@@ -194,12 +256,11 @@ def parse_hike_page(html: str, url: str) -> dict:
                     if candidate and len(candidate) < 100:
                         hike["depart"] = candidate
 
-            # Commune: from the bare text "38xxx COMMUNE-NAME"
-            dd_text = first_dd.get_text(separator="\n", strip=True)
+            # Postal code from address lines
             for line in dd_text.split("\n"):
                 zip_match = re.match(r"(\d{5})\s+(.+)", line.strip())
                 if zip_match and zip_match.group(1).startswith("38"):
-                    hike["commune"] = zip_match.group(2).strip()
+                    hike["code_postal"] = zip_match.group(1)
                     break
 
     # ------------------------------------------------------------------
@@ -208,14 +269,34 @@ def parse_hike_page(html: str, url: str) -> dict:
     for li in soup.find_all("li"):
         li_text = li.get_text(strip=True).lower()
         if "animaux acceptés" in li_text or "animaux autorisés" in li_text:
-            hike["animaux_acceptes"] = True
+            hike["animal_accepted"] = True
             break
-        elif "animaux refusés" in li_text or "animaux non" in li_text or "animaux interdits" in li_text:
-            hike["animaux_acceptes"] = False
+        elif (
+            "animaux refusés" in li_text
+            or "animaux non" in li_text
+            or "animaux interdits" in li_text
+        ):
+            hike["animal_accepted"] = False
             break
 
     # ------------------------------------------------------------------
-    # 4) GPS coordinates — from Google Maps link, scripts, or meta tags
+    # 4) GPX availability
+    # ------------------------------------------------------------------
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        text = a.get_text(" ", strip=True).lower()
+        full_url = urljoin(url, href)
+        if href.lower().endswith(".gpx") or full_url.lower().endswith(".gpx"):
+            hike["has_gpx"] = True
+            hike["gpx_url"] = full_url
+            break
+        if "gpx" in text or "trace" in text:
+            hike["has_gpx"] = True
+            hike["gpx_url"] = full_url
+            break
+
+    # ------------------------------------------------------------------
+    # 5) GPS coordinates — from Google Maps link, scripts, or meta tags
     # ------------------------------------------------------------------
     # Best source: the Google Maps link in the address section
     gps_link = soup.find("a", class_="gps", href=True)
@@ -246,14 +327,36 @@ def parse_hike_page(html: str, url: str) -> dict:
             if "longitude" in prop:
                 hike["longitude"] = _parse_float(content)
 
-    # ------------------------------------------------------------------
-    # 5) Fallback commune from full text if not found in address section
-    # ------------------------------------------------------------------
-    if not hike["commune"]:
+    if not hike["address"]:
         full_text = soup.get_text(separator="\n", strip=True)
-        commune_match = re.search(r"(\d{5})\s+([A-ZÀ-Ü\s\-]{3,40})", full_text)
-        if commune_match:
-            hike["commune"] = commune_match.group(2).strip()
+        address_match = re.search(r"([\w\s'\-,:()]+\n38\d{3}[\w\s'\-]+)", full_text)
+        if address_match:
+            hike["address"] = " | ".join(
+                [
+                    line.strip()
+                    for line in address_match.group(1).split("\n")
+                    if line.strip()
+                ]
+            )
+
+    if not hike["code_postal"]:
+        full_text = soup.get_text(separator="\n", strip=True)
+        zip_match = re.search(r"\b(38\d{3})\b", full_text)
+        if zip_match:
+            hike["code_postal"] = zip_match.group(1)
+
+    # Normalize textual fields by removing accents.
+    text_fields = [
+        "name",
+        "address",
+        "depart",
+        "difficulte",
+        "type_parcours",
+        "tarif",
+        "opening_period",
+    ]
+    for field in text_fields:
+        hike[field] = normalize_scraped_text(hike.get(field))
 
     return hike
 
@@ -269,9 +372,11 @@ def _stub_from_url(url: str) -> dict:
     name = re.sub(r"\b([ldLD]) ", r"\1'", name)
     name = name[0].upper() + name[1:] if name else name
     return {
+        "hike_id": extract_hike_id_from_url(url),
         "name": name,
         "url": url,
-        "commune": None,
+        "address": None,
+        "code_postal": None,
         "depart": None,
         "distance_km": None,
         "duree_min": None,
@@ -279,7 +384,11 @@ def _stub_from_url(url: str) -> dict:
         "denivele_negatif_m": None,
         "difficulte": None,
         "type_parcours": None,
-        "animaux_acceptes": None,
+        "animal_accepted": None,
+        "tarif": None,
+        "opening_period": None,
+        "has_gpx": False,
+        "gpx_url": None,
         "latitude": None,
         "longitude": None,
     }
@@ -301,7 +410,11 @@ async def scrape_all_hikes(urls: list[str] | None = None) -> list[dict]:
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+            ],
         )
 
         async def scrape_one(url: str) -> dict | None:
@@ -314,9 +427,15 @@ async def scrape_all_hikes(urls: list[str] | None = None) -> list[dict]:
                 page = await context.new_page()
                 await Stealth().apply_stealth_async(page)
                 try:
-                    resp = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    resp = await page.goto(
+                        url, wait_until="domcontentloaded", timeout=30000
+                    )
                     if not resp or resp.status != 200:
-                        logger.warning("HTTP %s for %s — creating stub entry", resp.status if resp else "None", url)
+                        logger.warning(
+                            "HTTP %s for %s — creating stub entry",
+                            resp.status if resp else "None",
+                            url,
+                        )
                         return _stub_from_url(url)
                     try:
                         await page.wait_for_load_state("networkidle", timeout=5000)

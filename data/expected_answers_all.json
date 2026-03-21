@@ -1,0 +1,595 @@
+[
+  {
+    "index": 0,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Sappey Eglise",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 1,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 6.0,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 2,
+    "answer_type": "boolean",
+    "field": "Boolean",
+    "expected": true,
+    "comparison": "exact",
+    "tolerance": null
+  },
+  {
+    "index": 3,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "La traversée du Mont Jalla",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 4,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Aller-retour",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 5,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "38640",
+    "comparison": "exact",
+    "tolerance": null
+  },
+  {
+    "index": 6,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "https://www.grenoble-tourisme.com/fr/catalogue/detail/boucle-de-chamechaude-5308872/",
+    "comparison": "contains",
+    "tolerance": null
+  },
+  {
+    "index": 7,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 60.0,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 8,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 800.0,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 9,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Fontaine",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 10,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 84,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 11,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 62,
+    "comparison": "exact",
+    "tolerance": 0,
+    "_note": "62 entrées de type Boucle dans le CSV"
+  },
+  {
+    "index": 12,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 22,
+    "comparison": "exact",
+    "tolerance": 0,
+    "_note": "22 entrées contiennent 'facile' dans le champ niveau du CSV"
+  },
+  {
+    "index": 13,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 25,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 14,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 135.8,
+    "comparison": "exact",
+    "tolerance": 0.05,
+    "_note": "2580/19 = 135.789 (19 randos Facile avec durée renseignée)"
+  },
+  {
+    "index": 15,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Le Sappey-En-Chartreuse",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 16,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 8,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 17,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 12,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 18,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 67,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 19,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 57,
+    "comparison": "exact",
+    "tolerance": 0,
+    "_note": "57 entrées avec animaux_acceptes=True dans le CSV"
+  },
+  {
+    "index": 20,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "GR® 738 - La Haute Traversée de Belledonne",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 21,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "GR® 738 - La Haute Traversée de Belledonne",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 22,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Sentier des géants",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 23,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Boucle du Grand Som",
+    "alternatives": ["Traversée de Chartreuse - Rando pédestre 5 jours"],
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 24,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "GR® 738 - La Haute Traversée de Belledonne",
+      "Traversée de Chartreuse - Rando pédestre 5 jours",
+      "Boucle de Chamechaude"
+    ],
+    "comparison": "fuzzy",
+    "tolerance": null,
+    "ordered": true
+  },
+  {
+    "index": 25,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "Beauregard par la Tour Ronde",
+      "Le fort du Murier",
+      "Le replat de Commiers",
+      "Randonnée familiale Entre Luitel et Prémol",
+      "De Prémol au Luitel",
+      "Circuit pédestre des remparts - 1h30 - Départ Office de Tourisme",
+      "Sentier des géants"
+    ],
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 26,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "Boucle de Chamechaude",
+      "Boucle des Emeindras",
+      "Crêtes du St Eynard",
+      "L'Ecoutoux",
+      "L'Emeindras par Habert de Chamechaude",
+      "Le fort du Saint-Eynard",
+      "Les crêtes et le fort du St Eynard depuis le Col de Vence"
+    ],
+    "alternatives": [
+      [
+        "Boucle de Chamechaude",
+        "Boucle des Emeindras",
+        "Crêtes du St Eynard",
+        "L'Ecoutoux",
+        "L'Emeindras par Habert de Chamechaude",
+        "Le fort du Saint-Eynard",
+        "Les crêtes et le fort du St Eynard depuis le Col de Vence",
+        "Traversée de Chartreuse - Rando pédestre 5 jours"
+      ],
+      [
+        "Boucle de Chamechaude",
+        "Boucle des Emeindras",
+        "Crêtes du St Eynard",
+        "L'Ecoutoux",
+        "L'Emeindras par Habert de Chamechaude",
+        "Le fort du Saint-Eynard",
+        "Les crêtes et le fort du St Eynard depuis le Col de Vence",
+        "Boucle du Bois du St Eynard",
+        "Le Sappey à la jumelle - Randonnée sonore",
+        "Boucle du Belvédère"
+      ],
+      [
+        "Boucle de Chamechaude",
+        "Boucle des Emeindras",
+        "Crêtes du St Eynard",
+        "L'Ecoutoux",
+        "L'Emeindras par Habert de Chamechaude",
+        "Le fort du Saint-Eynard",
+        "Les crêtes et le fort du St Eynard depuis le Col de Vence",
+        "Traversée de Chartreuse - Rando pédestre 5 jours",
+        "Boucle du Bois du St Eynard",
+        "Le Sappey à la jumelle - Randonnée sonore",
+        "Boucle du Belvédère"
+      ]
+    ],
+    "_note": "Traversée de Chartreuse + Boucle du Bois/Belvédère/Sappey jumelle ont commune='' mais sont géographiquement au Sappey",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 27,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "Traversée des Vouillants",
+      "La traversée du Mont Jalla",
+      "Les forts de la Bastille et du Saint-Eynard",
+      "Le sentier de la Fontaine Ardente",
+      "L'Ecoutoux",
+      "Chamechaude - Sommet",
+      "La Pinéa",
+      "La chapelle Saint-Ours et le belvédère de l'Echaillon",
+      "Le Grand-Veymont par le Pas de la Ville",
+      "Le Lac des Quirlies - randonnée depuis le Perron (Clavans-en-Haut-Oisans)",
+      "Le lac Blanc",
+      "Sommet du Charmant Som"
+    ],
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 28,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Le ruisseau de la Pissarde",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 29,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Randonnée entre Claix et Le Peuil",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 30,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "La tour des chiens",
+      "Beauregard par la Tour Ronde",
+      "Le fort du Murier",
+      "Le sentier de la Fontaine Ardente",
+      "La vallée de la Gresse",
+      "Les collines de Bellevue et Pravena",
+      "Le replat de Commiers",
+      "Randonnée familiale Entre Luitel et Prémol",
+      "De Prémol au Luitel",
+      "Le belvédère de Vizille",
+      "Boucle du Belvédère",
+      "Circuit pédestre des Vignasses - 1h45 - Départ Bourg St-Martin-d'Uriage",
+      "Circuit pédestre des remparts - 1h30 - Départ Office de Tourisme",
+      "Du désert de Jean-Jacques Rousseau à la ferme Froussard",
+      "Petit circuit pédestre des Roux - 1h45 - Départ Bourg St-Martin-d'Uriage",
+      "Sentier des géants",
+      "Sommet du Charmant Som"
+    ],
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 31,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "Boucle de Chamechaude",
+      "Les crêtes et le fort du St Eynard depuis le Col de Vence",
+      "Boucle du Grand Som",
+      "GR® 738 - La Haute Traversée de Belledonne",
+      "Le Grand-Veymont par le Pas de la Ville",
+      "Le Lac des Quirlies - randonnée depuis le Perron (Clavans-en-Haut-Oisans)",
+      "Le lac Blanc",
+      "Traversée de Chartreuse - Rando pédestre 5 jours"
+    ],
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 32,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "La traversée du Mont Jalla",
+      "Les forts de la Bastille et du Saint-Eynard"
+    ],
+    "alternatives": [
+      [
+        "La traversée du Mont Jalla",
+        "Les forts de la Bastille et du Saint-Eynard",
+        "Balade gourmande - Escapade panoramique au-dessus de Grenoble Alpes"
+      ]
+    ],
+    "_note": "Balade gourmande a commune='' mais titre et coordonnées (45.19/5.73) indiquent Grenoble",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 33,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Traversée de Chartreuse - Rando pédestre 5 jours",
+    "alternatives": ["Boucle de Chamechaude"],
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 34,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 1,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 35,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "La traversée du Mont Jalla",
+    "alternatives": ["Traversée de Chartreuse - Rando pédestre 5 jours"],
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 36,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Balade gourmande - Escapade panoramique au-dessus de Grenoble Alpes",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 37,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 8.79,
+    "comparison": "exact",
+    "tolerance": 0.1
+  },
+  {
+    "index": 38,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "La tour des chiens",
+      "Traversée des Vouillants",
+      "La traversée du Mont Jalla",
+      "Les forts de la Bastille et du Saint-Eynard",
+      "De Beauregard aux Michallons par la Grande Traversée du Vercors (GTV)",
+      "Balade gourmande - Escapade panoramique au-dessus de Grenoble Alpes",
+      "Du désert de Jean-Jacques Rousseau à la ferme Froussard",
+      "La Tour-Sans-Venin"
+    ],
+    "alternatives": [
+      [
+        "La tour des chiens",
+        "Traversée des Vouillants",
+        "La traversée du Mont Jalla",
+        "Les forts de la Bastille et du Saint-Eynard",
+        "De Beauregard aux Michallons par la Grande Traversée du Vercors (GTV)",
+        "Balade gourmande - Escapade panoramique au-dessus de Grenoble Alpes",
+        "Du désert de Jean-Jacques Rousseau à la ferme Froussard",
+        "La Tour-Sans-Venin",
+        "Le Rachais depuis le Col de Vence",
+        "La côte Charvet un belvédère fabuleux",
+        "Le Mont Rachais, un sommet aux versants contrastés, depuis le col de Vence",
+        "Les crêtes et le fort du St Eynard depuis le Col de Vence"
+      ]
+    ],
+    "_note": "Réponse sensible au géocodage de Place Grenette — hikes à 4.7-5.0 km du centre",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 39,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Le rocher de Comboire - Balade familiale",
+    "alternatives": ["Boucle dans le Parc Hubert Dubedout"],
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 40,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 9.4,
+    "comparison": "exact",
+    "tolerance": 0.1
+  },
+  {
+    "index": 41,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Boucle rando du Monastère de la Grande Chartreuse",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 42,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "La traversée du Mont Jalla",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 43,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 20.2,
+    "comparison": "exact",
+    "tolerance": 0.2,
+    "_note": "OSRM routing — durée en minutes, tolérance 20%"
+  },
+  {
+    "index": 44,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 19.4,
+    "comparison": "exact",
+    "tolerance": 0.2,
+    "_note": "OSRM routing — distance en km, tolérance 20%"
+  },
+  {
+    "index": 45,
+    "answer_type": "text",
+    "field": "Answer",
+    "expected": "Du désert de Jean-Jacques Rousseau à la ferme Froussard",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 46,
+    "answer_type": "items",
+    "field": "Items",
+    "expected": [
+      "Boucle de Chamechaude",
+      "Boucle des Emeindras",
+      "Crêtes du St Eynard",
+      "L'Ecoutoux",
+      "L'Emeindras par Habert de Chamechaude",
+      "Le fort du Saint-Eynard",
+      "Les crêtes et le fort du St Eynard depuis le Col de Vence"
+    ],
+    "alternatives": [
+      [
+        "Boucle de Chamechaude",
+        "Boucle des Emeindras",
+        "Crêtes du St Eynard",
+        "L'Ecoutoux",
+        "L'Emeindras par Habert de Chamechaude",
+        "Le fort du Saint-Eynard",
+        "Les crêtes et le fort du St Eynard depuis le Col de Vence",
+        "Traversée de Chartreuse - Rando pédestre 5 jours"
+      ],
+      [
+        "Boucle de Chamechaude",
+        "Boucle des Emeindras",
+        "Crêtes du St Eynard",
+        "L'Ecoutoux",
+        "L'Emeindras par Habert de Chamechaude",
+        "Le fort du Saint-Eynard",
+        "Les crêtes et le fort du St Eynard depuis le Col de Vence",
+        "Boucle du Bois du St Eynard",
+        "Le Sappey à la jumelle - Randonnée sonore",
+        "Boucle du Belvédère"
+      ],
+      [
+        "Boucle de Chamechaude",
+        "Boucle des Emeindras",
+        "Crêtes du St Eynard",
+        "L'Ecoutoux",
+        "L'Emeindras par Habert de Chamechaude",
+        "Le fort du Saint-Eynard",
+        "Les crêtes et le fort du St Eynard depuis le Col de Vence",
+        "Traversée de Chartreuse - Rando pédestre 5 jours",
+        "Boucle du Bois du St Eynard",
+        "Le Sappey à la jumelle - Randonnée sonore",
+        "Boucle du Belvédère"
+      ]
+    ],
+    "_note": "Traversée de Chartreuse + Boucle du Bois/Belvédère/Sappey jumelle ont commune='' mais sont géographiquement au Sappey",
+    "comparison": "fuzzy",
+    "tolerance": null
+  },
+  {
+    "index": 47,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 24.7,
+    "comparison": "exact",
+    "tolerance": 0.2,
+    "_note": "OSRM routing — durée en minutes, tolérance 20%"
+  },
+  {
+    "index": 48,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 22,
+    "comparison": "exact",
+    "tolerance": 0
+  },
+  {
+    "index": 49,
+    "answer_type": "numeric",
+    "field": "Numeric",
+    "expected": 3,
+    "comparison": "exact",
+    "tolerance": 0
+  }
+]
