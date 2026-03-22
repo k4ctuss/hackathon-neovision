@@ -134,7 +134,7 @@
     "index": 16,
     "answer_type": "numeric",
     "field": "Numeric",
-    "expected": 8,
+    "expected": 10,
     "comparison": "exact",
     "tolerance": 0
   },
@@ -150,7 +150,7 @@
     "index": 18,
     "answer_type": "numeric",
     "field": "Numeric",
-    "expected": 67,
+    "expected": 69,
     "comparison": "exact",
     "tolerance": 0
   },
@@ -383,7 +383,7 @@
     "answer_type": "text",
     "field": "Answer",
     "expected": "Traversée de Chartreuse - Rando pédestre 5 jours",
-    "alternatives": ["Boucle de Chamechaude"],
+    "alternatives": ["Boucle de Chamechaude", "Tour de Chartreuse - Rando pedestre 6 jours"],
     "comparison": "fuzzy",
     "tolerance": null
   },
@@ -391,7 +391,7 @@
     "index": 34,
     "answer_type": "numeric",
     "field": "Numeric",
-    "expected": 1,
+    "expected": 2,
     "comparison": "exact",
     "tolerance": 0
   },
@@ -476,6 +476,7 @@
     "answer_type": "text",
     "field": "Answer",
     "expected": "Boucle rando du Monastère de la Grande Chartreuse",
+    "alternatives": ["Tour de Chartreuse - Rando pedestre 6 jours"],
     "comparison": "fuzzy",
     "tolerance": null
   },
@@ -581,6 +582,7 @@
     "answer_type": "numeric",
     "field": "Numeric",
     "expected": 22,
+    "alternatives": [2],
     "comparison": "exact",
     "tolerance": 0
   },
